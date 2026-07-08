@@ -1,0 +1,59 @@
+# Product First — Development Gate
+
+Infrastructure is complete. **No new systems** unless they directly improve the customer experience.
+
+**Business model:** `docs/BUSINESS_MODEL.md` (LOCKED — two products only)
+
+**Builder Pass UX:** `docs/BUILDER_JOURNEY.md` — guided journey, not course/docs. See `.cursor/rules/builder-pass-product-rule.mdc`
+
+## Every task must improve at least one of:
+
+1. **Learning** — short checkpoints that enable building (not reading)
+2. **Building** — missions, guided workflows, real output
+3. **Customer transformation** — Learn → Build → Complete → Continue loop; upgrade readiness
+
+If a task does not clearly map to one of the above → **backlog**. Do not implement.
+
+## Builder Pass page gate
+
+Before shipping any Builder Pass screen:
+
+- Creates **momentum**, not documentation
+- Has one clear **primary action**
+- Matches **onboarding UX** (`/start-here` + `vault-ui.tsx`)
+- Feels like **completing a mission**, not consuming content
+
+If it fails → redesign, do not ship as-is.
+
+## Backlog (do not build without explicit request)
+
+- New pricing tiers (Lite, Enterprise, Teams)
+- Stripe / webhooks (unless blocking real sales)
+- Affiliate attribution, fraud, payout APIs, queues, Redis
+- Analytics platforms, heatmaps, event sourcing
+- Supabase migration (unless blocking content delivery)
+- Landing page CRO / marketing polish
+- New admin infrastructure unrelated to journey content
+- Email automations, community platforms
+- LMS-style course infrastructure (modules, video players, quizzes)
+
+## Allowed without asking
+
+- Mission-driven Builder Journey pages
+- First Build Mission walkthrough
+- Setup wizard → Mission 1 path
+- Transform `/vault/start` into journey entry (mission framing)
+- Bug fixes that block learning or building
+
+## Frozen systems (bug fixes only)
+
+- Business Model V1 — `business-model-locked.mdc`
+- Landing page V1 — `landing-frozen.mdc`
+- Onboarding wizard — `onboarding-frozen.mdc` (feeling is benchmark; copy frozen)
+- Affiliate Center V1 — `affiliate-center-frozen.mdc`
+
+## North star
+
+**Builder Pass qualifies buyers through missions. Monthly Build Pro ($29/mo) is the primary business.**
+
+See `docs/BUILDER_JOURNEY.md` for UX standard and `docs/AI_INCOME_BUILDER_COURSE.md` for Mission 1 content outline.

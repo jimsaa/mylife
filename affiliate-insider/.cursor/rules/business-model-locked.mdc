@@ -1,0 +1,26 @@
+# Business Model V1 — LOCKED
+
+Official source of truth: `docs/BUSINESS_MODEL.md`
+
+**Do not change pricing, product names, or tier structure without explicit founder decision.**
+
+## Two products only
+
+1. **Builder Pass** — $3 launch (30 days) → $9 lifetime. Entry product. Qualifies buyers.
+2. **Monthly Build Pro** — $29/month. **Primary business.**
+
+## Rules
+
+- Do NOT optimize Builder Pass for profit — optimize for upgrades to Monthly Build Pro
+- Do NOT add Lite, Enterprise, Teams, or extra tiers
+- Do NOT reintroduce VIP, $19/month, or "AI Income Builder" as product names
+- Use constants in `src/lib/constants.ts` and `src/lib/pricing.ts` — never hardcode prices in UI
+- Affiliate commissions: `src/lib/affiliate/constants.ts`
+
+## Replaced terminology
+
+| Use | Not |
+|-----|-----|
+| Builder Pass | AI Income Builder, Vault lifetime product |
+| Monthly Build Pro | Monthly Build, VIP |
+| Builder Pass member | Vault Member (customer-facing) |

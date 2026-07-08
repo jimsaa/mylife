@@ -1,0 +1,41 @@
+# Affiliate Center — FROZEN (V1 architecture approved)
+
+The Affiliate Center is **architecture-complete** and **frozen until post-launch paying customers**.
+
+**Commission rates:** `docs/BUSINESS_MODEL.md` — Builder Pass + Monthly Build Pro ($29/mo)
+
+## Shipped (do not rework)
+
+- Member UI: `/vault/affiliate` (dashboard, referral link, marketing kit, leaderboard, commissions, resources)
+- Admin UI: `/admin/affiliates`
+- Mock data + JSON store + `affiliate-repository.ts`
+- Supabase proposal: `supabase/affiliate-schema.sql`
+- Referral cookie capture on landing (`?ref=`)
+
+## Do NOT implement (Phase 2+ — after paying customers)
+
+- Stripe attribution / Connect payouts
+- Payment webhooks for commissions
+- Fraud detection
+- Payout automation
+- Queue systems
+- Background jobs
+- Redis
+- Advanced analytics
+- Click tracking service (`/r/[code]`)
+- Real leaderboard from live data
+
+## Allowed changes only
+
+- Critical bugs (broken links, access errors, UI crashes)
+- Copy tweaks in marketing kit **data** (not new affiliate infrastructure)
+- Business model pricing alignment in constants/mock copy
+- Admin content for `affiliate_assets`
+- **Manual payout V1** — settings, balance display, admin mark-as-paid (no APIs)
+
+## North star
+
+Product value first. Affiliate Center earns attention **after** Builder Pass buyers complete First Build Mission.
+
+See `docs/AFFILIATE_CENTER.md` for architecture reference.
+

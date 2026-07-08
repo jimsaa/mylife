@@ -1,0 +1,26 @@
+# Landing Page — FROZEN (V1)
+
+The Affiliate Insider landing page is **Version 1** and **frozen until after launch**.
+
+**Pricing/product copy:** governed by `docs/BUSINESS_MODEL.md` (LOCKED). Price constants in `src/lib/pricing.ts`.
+
+## Do NOT
+
+- Polish, redesign, or A/B test marketing pages
+- Add CRO tweaks (sticky CTAs, OG images, exit intent, etc.)
+- Expand FAQ, testimonials, or hero copy without explicit user request
+- Spend dev time on `src/components/marketing/**` except critical bugs or business-model pricing updates
+
+## DO
+
+- Invest all product effort in **buyer value**: AI Build Journey, First Build Mission, onboarding, member experience
+- North star: Builder Pass qualifies buyers for Monthly Build Pro ($29/mo)
+- Fix checkout/auth/payments only when required for real purchases
+
+## Scope
+
+- Frozen: `/`, `src/components/marketing/**` (except pricing constants alignment)
+- Active: `/vault/**`, lesson content, admin content, onboarding, product delivery
+
+Post-launch: CRO and landing iteration may resume after real conversion data exists.
+

@@ -1,0 +1,190 @@
+import type { AiToolCategory, AiToolDifficulty, AiToolRecommendationStatus } from '@/types';
+
+/** Mock seed shape — mapped to full AiTool in seed.ts */
+export interface MockAiTool {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  pricing: string;
+  website_url: string;
+  affiliate_url: string | null;
+  button_text: string;
+  secondary_button_label: string | null;
+  category: AiToolCategory;
+  difficulty: AiToolDifficulty | null;
+  free_trial: boolean | null;
+  recommendation_status: AiToolRecommendationStatus | null;
+  recommendation_reasons: string[];
+  badge: string | null;
+  click_count?: number;
+  featured?: boolean;
+  priority?: number;
+}
+
+export const MOCK_AI_TOOLS: MockAiTool[] = [
+  {
+    id: 't_cursor',
+    slug: 'cursor',
+    name: 'Cursor',
+    description:
+      'Cursor is the recommended AI Builder used throughout Builder Pass and Monthly Build Pro. It helps you build websites, apps, digital products and automation projects much faster by combining AI with a professional development environment.',
+    pricing: 'Free trial available',
+    category: 'ai_builder',
+    difficulty: 'beginner',
+    free_trial: true,
+    recommendation_status: 'recommended',
+    recommendation_reasons: [
+      'Beginner friendly',
+      'Used throughout this training',
+      'Perfect for building real projects',
+      'Great for AI-assisted coding',
+    ],
+    badge: '⭐ Our Recommended AI Builder',
+    website_url: 'https://cursor.com',
+    affiliate_url: 'https://bit.ly/3SLR4m3',
+    button_text: 'Install Cursor Free',
+    secondary_button_label: 'Learn More',
+    featured: true,
+    priority: 100,
+    click_count: 842,
+  },
+  {
+    id: 't1',
+    slug: 'chatgpt',
+    name: 'ChatGPT',
+    description: 'General-purpose AI for writing, research, and brainstorming.',
+    pricing: 'Free / $20 mo Plus',
+    website_url: 'https://chat.openai.com',
+    affiliate_url: null,
+    button_text: 'Visit',
+    secondary_button_label: null,
+    category: 'writing',
+    difficulty: null,
+    free_trial: null,
+    recommendation_status: null,
+    recommendation_reasons: [],
+    badge: null,
+  },
+  {
+    id: 't2',
+    slug: 'claude',
+    name: 'Claude',
+    description: 'Long-context AI excellent for detailed content and analysis.',
+    pricing: 'Free / $20 mo Pro',
+    website_url: 'https://claude.ai',
+    affiliate_url: null,
+    button_text: 'Visit',
+    secondary_button_label: null,
+    category: 'writing',
+    difficulty: null,
+    free_trial: null,
+    recommendation_status: null,
+    recommendation_reasons: [],
+    badge: null,
+  },
+  {
+    id: 't3',
+    slug: 'capcut',
+    name: 'CapCut',
+    description: 'Free video editor with AI captions and templates.',
+    pricing: 'Free / Pro plans',
+    website_url: 'https://www.capcut.com',
+    affiliate_url: null,
+    button_text: 'Visit',
+    secondary_button_label: null,
+    category: 'video',
+    difficulty: null,
+    free_trial: null,
+    recommendation_status: null,
+    recommendation_reasons: [],
+    badge: null,
+  },
+  {
+    id: 't4',
+    slug: 'canva',
+    name: 'Canva',
+    description: 'Design tool with AI image and copy features.',
+    pricing: 'Free / $15 mo Pro',
+    website_url: 'https://www.canva.com',
+    affiliate_url: 'https://partner.canva.com',
+    button_text: 'Get deal',
+    secondary_button_label: 'Learn More',
+    category: 'image',
+    difficulty: null,
+    free_trial: null,
+    recommendation_status: null,
+    recommendation_reasons: [],
+    badge: null,
+    click_count: 231,
+  },
+  {
+    id: 't5',
+    slug: 'make',
+    name: 'Make.com',
+    description: 'Visual automation for connecting apps and workflows.',
+    pricing: 'Free tier / from $9 mo',
+    website_url: 'https://www.make.com',
+    affiliate_url: 'https://www.make.com/en/partners',
+    button_text: 'Get deal',
+    secondary_button_label: 'Learn More',
+    category: 'automation',
+    difficulty: null,
+    free_trial: null,
+    recommendation_status: null,
+    recommendation_reasons: [],
+    badge: null,
+    click_count: 154,
+  },
+  {
+    id: 't6',
+    slug: 'jasper',
+    name: 'Jasper',
+    description: 'Marketing-focused AI copywriting platform.',
+    pricing: 'From $49 mo',
+    website_url: 'https://www.jasper.ai',
+    affiliate_url: 'https://www.jasper.ai/partners',
+    button_text: 'Get deal',
+    secondary_button_label: 'Learn More',
+    category: 'writing',
+    difficulty: null,
+    free_trial: null,
+    recommendation_status: null,
+    recommendation_reasons: [],
+    badge: null,
+  },
+  {
+    id: 't7',
+    slug: 'vidiq',
+    name: 'VidIQ',
+    description: 'YouTube SEO and analytics for growth.',
+    pricing: 'Free / from $7.50 mo',
+    website_url: 'https://vidiq.com',
+    affiliate_url: 'https://vidiq.com/affiliates',
+    button_text: 'Get deal',
+    secondary_button_label: 'Learn More',
+    category: 'analytics',
+    difficulty: null,
+    free_trial: null,
+    recommendation_status: null,
+    recommendation_reasons: [],
+    badge: null,
+  },
+  {
+    id: 't8',
+    slug: 'surfer-seo',
+    name: 'Surfer SEO',
+    description: 'Content optimization for search rankings.',
+    pricing: 'From $89 mo',
+    website_url: 'https://surferseo.com',
+    affiliate_url: 'https://surferseo.com/affiliate',
+    button_text: 'Get deal',
+    secondary_button_label: 'Learn More',
+    category: 'seo',
+    difficulty: null,
+    free_trial: null,
+    recommendation_status: null,
+    recommendation_reasons: [],
+    badge: null,
+  },
+];

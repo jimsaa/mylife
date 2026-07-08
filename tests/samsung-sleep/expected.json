@@ -1,0 +1,29 @@
+{
+  "description": "Canonical Samsung Health morning import — 3 screenshots (Overview, Sleep Factors, Sleep Stages)",
+  "date": "2026-06-15",
+  "time_in_bed_minutes": 513,
+  "actual_sleep_minutes": 487,
+  "bedtime": "22:42",
+  "wake_time": "09:03",
+  "sleep_score": 76,
+  "overall_rating": "Bra",
+  "actual_sleep_rating": "Ganska bra",
+  "deep_sleep_rating": "Ganska bra",
+  "rem_rating": "Ganska bra",
+  "restfulness_rating": "Obs!",
+  "sleep_latency_rating": "Utmärkt",
+  "awake_minutes": 26,
+  "awake_percent": 5,
+  "rem_sleep_minutes": 99,
+  "rem_percent": 20,
+  "light_sleep_minutes": 279,
+  "light_percent": 57,
+  "deep_sleep_minutes": 109,
+  "deep_percent": 22,
+  "blood_oxygen_graph_detected": false,
+  "classifications": {
+    "overview": "overview",
+    "sleep_factors": "sleep_factors",
+    "sleep_stages": "sleep_stages"
+  }
+}

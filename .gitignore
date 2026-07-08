@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+**/.next/
+out/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local databases & user data
+server/data/
+!server/data/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+affiliate-insider/data/store/database.json
+
+# Vercel
+.vercel
+**/.vercel
+
+# OS & logs
+.DS_Store
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/

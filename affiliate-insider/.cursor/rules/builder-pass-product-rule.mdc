@@ -1,0 +1,81 @@
+# Builder Pass — Product Rule (LOCKED)
+
+**Builder Pass is a guided Builder Journey — not a course, not documentation, not a knowledge base.**
+
+See `docs/BUILDER_JOURNEY.md` for full UX standard.
+
+---
+
+## What Builder Pass IS
+
+A **guided Builder Journey** where the customer repeatedly:
+
+**Learn → Build → Complete → Continue**
+
+Every screen creates momentum. Every page leads to action.
+
+---
+
+## What Builder Pass is NOT
+
+- ❌ A course (lectures, modules to "consume")
+- ❌ Documentation (reference docs, long reading)
+- ❌ A knowledge base (browse-and-read library)
+- ❌ An admin dashboard experience
+- ❌ A content dump (prompts/hooks/tools as the product)
+
+---
+
+## UX benchmark
+
+**Onboarding (`/start-here`) is the design and UX standard for every Builder Pass page.**
+
+Match:
+- Dark premium canvas (`bg-zinc-950`, gradient orbs)
+- Premium cards (`vault-ui.tsx` / `WizardCard` styling)
+- Short copy, clear next action
+- Progress and mission framing
+- Violet/fuchsia accents, same typography and buttons
+
+---
+
+## Page test (apply before shipping any Builder Pass screen)
+
+Ask:
+
+1. Does this screen create **momentum** or invite **reading**?
+2. Is the primary action obvious within 5 seconds?
+3. Does it feel like **completing a mission** or **consuming content**?
+4. Does it continue the **onboarding feeling**?
+
+If it feels like documentation → **redesign before ship**.
+
+---
+
+## Allowed content libraries
+
+Prompts, hooks, tools, and downloads may exist **in service of missions** — not as standalone browse experiences.
+
+Reference libraries are **supporting assets**, not the journey itself.
+
+---
+
+## Relationship to other rules
+
+| Rule | Relationship |
+|------|----------------|
+| `product-first.mdc` | Infrastructure gate — this rule is the **UX gate** for Builder Pass |
+| `onboarding-frozen.mdc` | Onboarding copy/layout frozen; **feeling** is the benchmark for new pages |
+| `business-model-locked.mdc` | Builder Pass qualifies; Monthly Build Pro is primary business |
+
+---
+
+## When building Mission 1+
+
+- One clear mission per session
+- Checkpoints, not chapters
+- "Do this now" beats "read this first"
+- Progress always visible
+- Next step always one click away
+
+**North star:** Customer feels they are **building**, not **studying**.

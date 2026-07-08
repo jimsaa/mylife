@@ -1,0 +1,24 @@
+# Onboarding Wizard — FROZEN (production)
+
+The setup wizard at `/start-here` is **production quality** and **frozen**.
+
+Final review complete. **Bug fixes only** — no copy, layout, or feature changes without explicit founder request.
+
+## Do NOT
+
+- Redesign steps, layout, spacing, or components
+- Add features or new wizard steps
+- Rewrite copy or flow diagram
+
+## Allowed
+
+- Critical bug fixes (broken links, redirect errors, access gates)
+- Data fixes for Cursor tool record (badge, affiliate URL)
+
+## Scope
+
+- `src/components/setup-wizard/**`
+- `src/lib/setup-wizard/**`
+- `src/app/start-here/**`
+
+**Next priority:** Mission 1 and the Builder Journey experience.
