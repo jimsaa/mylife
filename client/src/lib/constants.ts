@@ -2,6 +2,7 @@ export const APP_NAME = 'My Life';
 
 /** Base path for the private My Life dashboard (not linked from the public site). */
 export const ADMIN_BASE = '/admin';
+export const ADMIN_LOGIN = `${ADMIN_BASE}/login`;
 
 export const NAV_ITEMS = [
   { path: ADMIN_BASE, label: 'Översikt' },

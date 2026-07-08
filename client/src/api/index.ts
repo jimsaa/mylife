@@ -172,3 +172,10 @@ export const profileApi = {
     api.post<ProfileSettings>('/profile/avatar', { image_base64, mime_type }),
   removeAvatar: () => api.delete<ProfileSettings>('/profile/avatar'),
 };
+
+/** Temporary password gate — replace with Supabase Auth later. */
+export const authApi = {
+  session: () => api.get<{ authenticated: boolean }>('/auth/session'),
+  login: (password: string) => api.post<{ ok: boolean }>('/auth/login', { password }),
+  logout: () => api.post<{ ok: boolean }>('/auth/logout'),
+};

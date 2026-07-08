@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { authApi } from '../../api';
 import { useProfile } from '../../context/ProfileContext';
-import { ADMIN_BASE, APP_NAME, NAV_ITEMS } from '../../lib/constants';
+import { ADMIN_BASE, ADMIN_LOGIN, APP_NAME, NAV_ITEMS } from '../../lib/constants';
 import { UserAvatar } from './UserAvatar';
 
 const COLLAPSE_KEY = 'my-life-sidebar-collapsed';
 
 export function Sidebar() {
   const { profile } = useProfile();
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(COLLAPSE_KEY) === 'true';
@@ -23,6 +25,14 @@ export function Sidebar() {
       // ignore
     }
   }, [collapsed]);
+
+  async function handleLogout() {
+    try {
+      await authApi.logout();
+    } finally {
+      navigate(ADMIN_LOGIN, { replace: true });
+    }
+  }
 
   return (
     <aside
@@ -77,7 +87,14 @@ export function Sidebar() {
           </ul>
         </nav>
 
-        <div className="border-t border-border p-2">
+        <div className="border-t border-border p-2 space-y-1">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="w-full rounded-lg px-2 py-2 text-xs text-text-muted transition hover:bg-surface-muted hover:text-text"
+          >
+            {collapsed ? '⎋' : 'Logga ut'}
+          </button>
           <button
             type="button"
             onClick={() => setCollapsed((value) => !value)}

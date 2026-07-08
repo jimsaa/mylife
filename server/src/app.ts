@@ -17,6 +17,8 @@ import sleepImportRoutes from './routes/sleepImportRoutes.js';
 import dailySleepCheckinRoutes from './routes/dailySleepCheckinRoutes.js';
 import teslaRoutes from './routes/teslaRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import { requireAdminAuth } from './middleware/requireAdminAuth.js';
 
 export function createApp() {
   const app = express();
@@ -41,6 +43,9 @@ export function createApp() {
       network_urls,
     });
   });
+
+  app.use('/api/auth', authRoutes);
+  app.use(requireAdminAuth);
 
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/projects', projectRoutes);
