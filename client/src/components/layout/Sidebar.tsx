@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useProfile } from '../../context/ProfileContext';
-import { APP_NAME, NAV_ITEMS } from '../../lib/constants';
+import { ADMIN_BASE, APP_NAME, NAV_ITEMS } from '../../lib/constants';
 import { UserAvatar } from './UserAvatar';
 
 const COLLAPSE_KEY = 'my-life-sidebar-collapsed';
@@ -58,7 +58,7 @@ export function Sidebar() {
               <li key={item.path}>
                 <NavLink
                   to={item.path}
-                  end={item.path === '/'}
+                  end={item.path === ADMIN_BASE}
                   title={item.label}
                   className={({ isActive }) =>
                     `block rounded-lg text-sm transition ${
@@ -116,7 +116,7 @@ export function MobileNav() {
           <NavLink
             key={item.path}
             to={item.path}
-            end={item.path === '/'}
+            end={item.path === ADMIN_BASE}
             className={({ isActive }) =>
               `shrink-0 rounded-lg px-3 py-1.5 text-xs transition ${
                 isActive ? 'bg-teal-50 font-medium text-accent' : 'text-text-muted'

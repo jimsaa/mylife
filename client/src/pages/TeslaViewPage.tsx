@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { sleepCheckinApi, taxiTimerApi, teslaApi } from '../api';
-import { MORNING_ENERGY_LABELS } from '../lib/constants';
+import { MORNING_ENERGY_LABELS, ADMIN_BASE } from '../lib/constants';
 import {
   formatDate,
   formatDurationHms,
@@ -378,7 +378,7 @@ export function TeslaViewPage() {
               </ul>
             )}
             <Link
-              to="/kalender"
+              to={`${ADMIN_BASE}/kalender`}
               className="inline-flex min-h-12 items-center rounded-xl border border-white/15 px-4 text-base text-slate-300 transition hover:bg-white/5"
             >
               Visa fullständig kalender →
@@ -418,19 +418,19 @@ export function TeslaViewPage() {
       <nav className="fixed bottom-0 left-0 right-0 border-t border-white/10 bg-[#0b0f14]/95 backdrop-blur-md">
         <div className="mx-auto flex max-w-lg gap-2 p-3">
           <Link
-            to="/"
+            to={ADMIN_BASE}
             className="flex min-h-14 flex-1 items-center justify-center rounded-xl border border-white/10 text-base text-slate-300 transition hover:bg-white/5"
           >
             Översikt
           </Link>
           <Link
-            to="/kalender"
+            to={`${ADMIN_BASE}/kalender`}
             className="flex min-h-14 flex-1 items-center justify-center rounded-xl border border-white/10 text-base text-slate-300 transition hover:bg-white/5"
           >
             Kalender
           </Link>
           <Link
-            to="/"
+            to={ADMIN_BASE}
             className="flex min-h-14 flex-1 items-center justify-center rounded-xl bg-teal-900/40 text-base text-teal-200 transition hover:bg-teal-900/60"
           >
             Full My Life

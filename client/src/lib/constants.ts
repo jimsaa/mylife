@@ -1,18 +1,21 @@
 export const APP_NAME = 'My Life';
 
+/** Base path for the private My Life dashboard (not linked from the public site). */
+export const ADMIN_BASE = '/admin';
+
 export const NAV_ITEMS = [
-  { path: '/', label: 'Översikt' },
-  { path: '/kalender', label: 'Kalender' },
-  { path: '/tid', label: 'Tid' },
-  { path: '/projekt', label: 'Projekt' },
-  { path: '/statistik', label: 'Statistik' },
-  { path: '/journal', label: 'Journal' },
-  { path: '/valbefinnande', label: 'Välbefinnande' },
-  { path: '/somn', label: 'Sömn' },
-  { path: '/mat', label: 'Mat' },
-  { path: '/taxi', label: 'Taxi' },
-  { path: '/mal', label: 'Mål' },
-  { path: '/installningar', label: 'Inställningar' },
+  { path: ADMIN_BASE, label: 'Översikt' },
+  { path: `${ADMIN_BASE}/kalender`, label: 'Kalender' },
+  { path: `${ADMIN_BASE}/tid`, label: 'Tid' },
+  { path: `${ADMIN_BASE}/projekt`, label: 'Projekt' },
+  { path: `${ADMIN_BASE}/statistik`, label: 'Statistik' },
+  { path: `${ADMIN_BASE}/journal`, label: 'Journal' },
+  { path: `${ADMIN_BASE}/valbefinnande`, label: 'Välbefinnande' },
+  { path: `${ADMIN_BASE}/somn`, label: 'Sömn' },
+  { path: `${ADMIN_BASE}/mat`, label: 'Mat' },
+  { path: `${ADMIN_BASE}/taxi`, label: 'Taxi' },
+  { path: `${ADMIN_BASE}/mal`, label: 'Mål' },
+  { path: `${ADMIN_BASE}/installningar`, label: 'Inställningar' },
 ] as const;
 
 export const MEAL_CATEGORIES = {

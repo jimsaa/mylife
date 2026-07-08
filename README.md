@@ -1,6 +1,32 @@
 # My Life
 
-Local-first personal productivity and life management application — a single-user "Life Operating System".
+Personal productivity and life management application — production site for [jimsaari.se](https://jimsaari.se).
+
+## Public site
+
+| Route | Description |
+| ----- | ----------- |
+| `/` | Public landing page (JIM SAARI — Under Development) |
+
+## Private application
+
+The full My Life dashboard is available at `/admin` (not linked from the public site).
+
+| Module        | Route                      | Description                              |
+| ------------- | -------------------------- | ---------------------------------------- |
+| Översikt      | `/admin`                   | Dashboard with personalized hero profile |
+| Kalender      | `/admin/kalender`          | Weekly calendar with drag-and-drop       |
+| Tid           | `/admin/tid`               | Timer and manual time entries            |
+| Projekt       | `/admin/projekt`           | Project management with hour stats       |
+| Statistik     | `/admin/statistik`         | 7/30-day charts and summaries            |
+| Journal       | `/admin/journal`           | Daily reflection journal                 |
+| Välbefinnande | `/admin/valbefinnande`     | Energy, mood, stress check-in            |
+| Sömn          | `/admin/somn`              | Sleep logging + screenshot import        |
+| Mat           | `/admin/mat`               | Simple calorie awareness (2500 kcal goal) |
+| Taxi          | `/admin/taxi`              | Shift tracking and trends                |
+| Mål           | `/admin/mal`               | Life goals with progress                 |
+| Inställningar | `/admin/installningar`     | Profile, avatar, connection test         |
+| Tesla view    | `/admin/tesla`             | Mobile-optimized life overview           |
 
 ## Principles
 
@@ -102,7 +128,19 @@ Use My Life from a phone or tablet while the laptop is running locally — no de
 
 If the page does not load on mobile, check Windows Firewall allows Node.js on private networks.
 
-### Production preview
+## Vercel deployment (jimsaari.se)
+
+Repository: [github.com/jimsaa/mylife](https://github.com/jimsaa/mylife)
+
+1. Connect the existing Vercel project to `jimsaa/mylife` (root directory: repository root).
+2. Build settings are defined in `vercel.json` (`npm run build` → `client/dist`).
+3. Point `jimsaari.se` to the Vercel project.
+
+**Note:** Vercel hosts the frontend only. The Express + SQLite API (`server/`) runs separately for full dashboard functionality. Use `npm run dev` locally or deploy the API to a host that supports persistent storage.
+
+See `.env.example` for environment variables.
+
+### Production preview (local)
 
 After building, preview the production bundle on the same default port:
 
@@ -140,20 +178,7 @@ High Pressure Bets, CabRadar, MakerWorld Download Machine, Digital Product Facto
 
 ## Features (V1)
 
-| Module        | Route            | Description                              |
-| ------------- | ---------------- | ---------------------------------------- |
-| Översikt      | `/`              | Dashboard with personalized hero profile |
-| Kalender      | `/kalender`      | Weekly calendar with drag-and-drop       |
-| Tid           | `/tid`           | Timer and manual time entries            |
-| Projekt       | `/projekt`       | Project management with hour stats       |
-| Statistik     | `/statistik`     | 7/30-day charts and summaries            |
-| Journal       | `/journal`       | Daily reflection journal                 |
-| Välbefinnande | `/valbefinnande` | Energy, mood, stress check-in            |
-| Sömn          | `/somn`          | Sleep logging + screenshot import        |
-| Mat           | `/mat`           | Simple calorie awareness (2500 kcal goal) |
-| Taxi          | `/taxi`          | Shift tracking and trends                |
-| Mål           | `/mal`           | Life goals with progress                 |
-| Inställningar | `/installningar` | Profile, avatar, connection test         |
+See route table above under **Private application**.
 
 ## Personalized dashboard hero
 
@@ -165,7 +190,7 @@ The dashboard opens with a hero section showing:
 - Dynamic motivational insight from your data
 - Quick action buttons (tid, taxi, sömn, mat, journal)
 
-Configure profile under **Inställningar** (`/installningar`):
+Configure profile under **Inställningar** (`/admin/installningar`):
 
 - Upload, replace, or remove avatar (PNG/JPG/WEBP, max 5 MB)
 - Edit display name
@@ -204,7 +229,7 @@ All endpoints are prefixed with `/api`:
 
 ## Samsung Sleep Import V2
 
-On **Sömn** (`/somn`), click **Importera Samsung-sömn** for the daily morning routine.
+On **Sömn** (`/admin/somn`), click **Importera Samsung-sömn** for the daily morning routine.
 
 ### Morning workflow
 
@@ -234,7 +259,7 @@ Canonical fixtures: `tests/samsung-sleep/` (add your 3 PNG screenshots + `expect
 
 ## Sleep screenshot import (generic)
 
-On **Sömn** (`/somn`), click **Importera sömnbild** to upload a Samsung Health (or similar) screenshot.
+On **Sömn** (`/admin/somn`), click **Importera sömnbild** to upload a Samsung Health (or similar) screenshot.
 
 ### Flow
 

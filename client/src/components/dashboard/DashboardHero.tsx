@@ -1,15 +1,15 @@
 import { Link } from 'react-router-dom';
 import { Button } from '../ui/Button';
-import { ENERGY_LABELS } from '../../lib/constants';
+import { ADMIN_BASE, ENERGY_LABELS } from '../../lib/constants';
 import { formatHours } from '../../lib/format';
 import type { DashboardHero } from '../../types';
 
 const QUICK_ACTIONS = [
-  { to: '/tid', label: 'Logga tid', icon: '➕' },
-  { to: '/taxi', label: 'Taxi-pass', icon: '🚕' },
-  { to: '/somn', label: 'Registrera sömn', icon: '😴' },
-  { to: '/mat', label: 'Lägg till måltid', icon: '🍽' },
-  { to: '/journal', label: 'Dagboksanteckning', icon: '📝' },
+  { to: `${ADMIN_BASE}/tid`, label: 'Logga tid', icon: '➕' },
+  { to: `${ADMIN_BASE}/taxi`, label: 'Taxi-pass', icon: '🚕' },
+  { to: `${ADMIN_BASE}/somn`, label: 'Registrera sömn', icon: '😴' },
+  { to: `${ADMIN_BASE}/mat`, label: 'Lägg till måltid', icon: '🍽' },
+  { to: `${ADMIN_BASE}/journal`, label: 'Dagboksanteckning', icon: '📝' },
 ] as const;
 
 interface DashboardHeroProps {

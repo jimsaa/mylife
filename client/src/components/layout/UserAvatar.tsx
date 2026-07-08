@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { ADMIN_BASE } from '../../lib/constants';
 
 type UserAvatarSize = 'sidebar' | 'sidebar-collapsed' | 'mobile' | 'settings';
 
@@ -44,7 +45,7 @@ export function UserAvatar({
 
   return (
     <Link
-      to="/installningar"
+      to={`${ADMIN_BASE}/installningar`}
       className="inline-flex transition hover:opacity-90"
       aria-label="Profilinställningar"
       title="Profilinställningar"

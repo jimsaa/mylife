@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dashboardApi } from '../api';
+import { ADMIN_BASE } from '../lib/constants';
 
 import { DashboardHeroSection } from '../components/dashboard/DashboardHero';
 import { MorningSleepCard } from '../components/dashboard/MorningSleepCard';
@@ -185,7 +186,7 @@ export function DashboardPage() {
 
 
 
-        <MorningSleepCard sleep={data.morning_sleep} onAddSleep={() => navigate('/somn')} />
+        <MorningSleepCard sleep={data.morning_sleep} onAddSleep={() => navigate(`${ADMIN_BASE}/somn`)} />
 
         <Card title="Dagens energi">
 

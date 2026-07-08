@@ -12,9 +12,7 @@
     "migrate": "npm run migrate --prefix server",
     "seed": "npm run seed --prefix server",
     "test:samsung-sleep": "npm run test:samsung-sleep --prefix server",
-    "dev:affiliate": "npm run dev --prefix affiliate-insider",
-    "build:affiliate": "npm run build --prefix affiliate-insider",
-    "setup": "npm install && npm install --prefix client && npm install --prefix server && npm install --prefix affiliate-insider && npm run migrate && npm run seed"
+    "setup": "npm install && npm install --prefix client && npm install --prefix server && npm run migrate && npm run seed"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
