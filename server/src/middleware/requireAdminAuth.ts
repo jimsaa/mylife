@@ -3,7 +3,7 @@ import {
   ADMIN_SESSION_COOKIE,
   parseCookieHeader,
   verifySessionCookieValue,
-} from '../../../shared/auth/temp-gate.ts';
+} from '../../../api/_lib/temp-gate.ts';
 
 /** Protects API routes until Supabase Auth replaces this gate. */
 export function requireAdminAuth(req: Request, res: Response, next: NextFunction): void {

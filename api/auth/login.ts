@@ -3,7 +3,7 @@ import {
   buildSessionCookieHeader,
   checkTempPassword,
   createSessionCookieValue,
-} from '../../shared/auth/temp-gate.ts';
+} from '../_lib/temp-gate';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {

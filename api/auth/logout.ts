@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { clearSessionCookieHeader } from '../../shared/auth/temp-gate.ts';
+import { clearSessionCookieHeader } from '../_lib/temp-gate';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {

@@ -1,8 +1,8 @@
 /**
  * Temporary password gate — replace with Supabase Auth + TOTP later.
- * Shared by Express (local dev) and Vercel serverless (production).
+ * Lives under api/_lib so Vercel serverless can bundle it reliably.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 export const ADMIN_SESSION_COOKIE = 'my_life_admin_session';
 export const SESSION_MAX_AGE_SEC = 86_400;

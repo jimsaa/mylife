@@ -7,7 +7,7 @@ import {
   createSessionCookieValue,
   parseCookieHeader,
   verifySessionCookieValue,
-} from '../../../shared/auth/temp-gate.ts';
+} from '../../../api/_lib/temp-gate.ts';
 
 const router = Router();
 

@@ -3,7 +3,7 @@ import {
   ADMIN_SESSION_COOKIE,
   parseCookieHeader,
   verifySessionCookieValue,
-} from '../../shared/auth/temp-gate.ts';
+} from '../_lib/temp-gate';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
