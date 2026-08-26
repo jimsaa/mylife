@@ -58,7 +58,13 @@ function readFileAsBase64(file: File): Promise<PendingImage> {
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err.trim()) return err;
   return 'Save failed. Is the API server running (npm run dev)?';
+}
+
+function isProductionHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  return /jimsaari\.se$/i.test(window.location.hostname);
 }
 
 export function ProjectCardsAdminPage() {
@@ -75,11 +81,16 @@ export function ProjectCardsAdminPage() {
 
   const load = async () => {
     try {
+      setError(null);
       setCards(await projectCardApi.listAdmin());
     } catch (err) {
       console.error(err);
+      const detail = errorMessage(err);
       setError(
-        'Could not load project cards. Make sure the API is running (npm run dev) and you are logged in.',
+        isProductionHost()
+          ? `${detail} Manage and save Project Cards at http://localhost:3006/admin/project-cards (npm run dev). jimsaari.se has no Express/SQLite API.`
+          : detail ||
+              'Could not load project cards. Make sure the API is running (npm run dev) and you are logged in.',
       );
     }
   };
@@ -203,7 +214,12 @@ export function ProjectCardsAdminPage() {
       await load();
     } catch (err) {
       console.error('Project card save failed:', err);
-      setError(errorMessage(err));
+      const detail = errorMessage(err);
+      setError(
+        isProductionHost()
+          ? `${detail} Use http://localhost:3006/admin/project-cards to save (API + SQLite). Production needs a deployed Project Cards API + Vercel Blob.`
+          : detail,
+      );
     } finally {
       setSaving(false);
     }

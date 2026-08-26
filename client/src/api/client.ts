@@ -1,5 +1,23 @@
 const BASE = '/api';
 
+async function parseBody(res: Response): Promise<{ error?: string } & Record<string, unknown>> {
+  const contentType = res.headers.get('content-type') ?? '';
+  if (contentType.includes('application/json')) {
+    return (await res.json().catch(() => ({ error: res.statusText }))) as {
+      error?: string;
+    };
+  }
+  const text = await res.text().catch(() => '');
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<!doctype') || trimmed.startsWith('<html')) {
+    return {
+      error:
+        'API route returned the website HTML instead of JSON. On jimsaari.se this means the Project Cards API is not deployed yet — pull latest and redeploy, or use local npm run dev.',
+    };
+  }
+  return { error: text.slice(0, 200) || res.statusText };
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
@@ -7,7 +25,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
+    const body = await parseBody(res);
     const error = new Error(body.error ?? 'Request failed') as Error & {
       status?: number;
       body?: unknown;
@@ -17,6 +35,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw error;
   }
   if (res.status === 204) return undefined as T;
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    const body = await parseBody(res);
+    throw new Error(body.error ?? 'Unexpected non-JSON API response');
+  }
   return res.json();
 }
 
