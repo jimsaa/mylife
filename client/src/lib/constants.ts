@@ -16,6 +16,8 @@ export const NAV_ITEMS = [
   { path: `${ADMIN_BASE}/mat`, label: 'Mat' },
   { path: `${ADMIN_BASE}/taxi`, label: 'Taxi' },
   { path: `${ADMIN_BASE}/mal`, label: 'Mål' },
+  { path: `${ADMIN_BASE}/arv`, label: 'Digital Legacy' },
+  { path: `${ADMIN_BASE}/project-cards`, label: 'Project Cards' },
   { path: `${ADMIN_BASE}/installningar`, label: 'Inställningar' },
 ] as const;
 

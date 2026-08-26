@@ -179,3 +179,148 @@ export const authApi = {
   login: (password: string) => api.post<{ ok: boolean }>('/auth/login', { password }),
   logout: () => api.post<{ ok: boolean }>('/auth/logout'),
 };
+
+/** Digital Legacy — admin + public portal */
+export const legacyApi = {
+  status: () => api.get<import('../types').LegacyStatus>('/legacy/status'),
+  updateConfig: (body: Partial<{
+    enabled: boolean;
+    check_interval_days: number;
+    reminder_1_days: number;
+    reminder_2_days: number;
+    activation_days: number;
+    token_lifetime_hours: number;
+    legacy_role: string;
+    public_base_url: string | null;
+  }>) => api.put<import('../types').LegacyConfig>('/legacy/config', body),
+  listContacts: () => api.get<import('../types').LegacyContact[]>('/legacy/contacts'),
+  createContact: (body: {
+    name: string;
+    relationship?: string;
+    email: string;
+    activation_priority?: number;
+    enabled?: boolean;
+  }) => api.post<import('../types').LegacyContact>('/legacy/contacts', body),
+  updateContact: (
+    id: number,
+    body: Partial<{
+      name: string;
+      relationship: string;
+      email: string;
+      activation_priority: number;
+      enabled: boolean;
+    }>,
+  ) => api.put<import('../types').LegacyContact>(`/legacy/contacts/${id}`, body),
+  deleteContact: (id: number) => api.delete(`/legacy/contacts/${id}`),
+  audit: (limit = 100) =>
+    api.get<import('../types').LegacyAuditEntry[]>(`/legacy/audit?limit=${limit}`),
+  confirmAlive: () => api.post<import('../types').LegacyLifeState>('/legacy/confirm-alive'),
+  sendLifeCheck: () => api.post<{ ok: boolean; error?: string }>('/legacy/send-life-check'),
+  triggerActivation: () =>
+    api.post<{ ok: boolean; sent?: number; error?: string }>('/legacy/trigger-activation'),
+  runScheduler: () =>
+    api.post<{ actions: string[]; state: import('../types').LegacyLifeState }>(
+      '/legacy/run-scheduler',
+    ),
+
+  // Public (no admin cookie required — same /api base with credentials)
+  publicConfirm: (token: string) =>
+    api.get<{ ok: boolean; message?: string; error?: string }>(
+      `/legacy/public/confirm?token=${encodeURIComponent(token)}`,
+    ),
+  publicVerify: (token: string) =>
+    api.get<{
+      ok: boolean;
+      contact?: { name: string; relationship: string; email: string };
+      expires_at?: string;
+      error?: string;
+    }>(`/legacy/public/verify?token=${encodeURIComponent(token)}`),
+  publicClaim: (token: string, password: string) =>
+    api.post<{
+      ok: boolean;
+      role?: string;
+      legacy_intro_completed?: boolean;
+      contact?: { name: string; email: string };
+      error?: string;
+    }>('/legacy/public/claim', { token, password }),
+  publicLogin: (email: string, password: string) =>
+    api.post<{
+      ok: boolean;
+      role?: string;
+      legacy_intro_completed?: boolean;
+      contact?: { name: string; email: string };
+      error?: string;
+    }>('/legacy/public/login', { email, password }),
+  publicLogout: () => api.post<{ ok: boolean }>('/legacy/public/logout'),
+  publicSession: () =>
+    api.get<{
+      authenticated: boolean;
+      role?: string;
+      legacy_intro_completed?: boolean;
+      contact?: { name: string; email: string; relationship: string };
+    }>('/legacy/public/session'),
+  publicWelcome: () =>
+    api.get<{ id: number; title: string; body: string; updated_at: string }>(
+      '/legacy/public/welcome',
+    ),
+  publicCompleteIntro: () => api.post<{ ok: boolean }>('/legacy/public/complete-intro'),
+  publicInstructions: () =>
+    api.get<{
+      sections: import('../types').LegacyInstructionSection[];
+      updated_at: string | null;
+    }>('/legacy/public/instructions'),
+
+  // Admin estate content
+  getWelcome: () =>
+    api.get<{ id: number; title: string; body: string; updated_at: string }>('/legacy/welcome'),
+  updateWelcome: (body: { title: string; body: string }) =>
+    api.put<{ id: number; title: string; body: string; updated_at: string }>(
+      '/legacy/welcome',
+      body,
+    ),
+  getInstructions: () =>
+    api.get<{
+      sections: import('../types').LegacyInstructionSection[];
+      updated_at: string | null;
+    }>('/legacy/instructions'),
+  createInstruction: (body: { title: string; body?: string; sort_order?: number }) =>
+    api.post<import('../types').LegacyInstructionSection>('/legacy/instructions', body),
+  updateInstruction: (
+    id: number,
+    body: Partial<{ title: string; body: string; sort_order: number }>,
+  ) => api.put<import('../types').LegacyInstructionSection>(`/legacy/instructions/${id}`, body),
+  deleteInstruction: (id: number) => api.delete(`/legacy/instructions/${id}`),
+  reorderInstructions: (ordered_ids: number[]) =>
+    api.put<{ sections: import('../types').LegacyInstructionSection[] }>(
+      '/legacy/instructions/reorder',
+      { ordered_ids },
+    ),
+};
+
+/** Project Cards — public homepage + admin CRUD */
+export const projectCardApi = {
+  listPublic: () => api.get<import('../types').ProjectCard[]>('/project-cards'),
+  listAdmin: () => api.get<import('../types').ProjectCard[]>('/admin/project-cards'),
+  create: (body: {
+    title: string;
+    description?: string | null;
+    url: string;
+    active?: boolean;
+    sort_order?: number;
+    image_base64: string;
+    mime_type: string;
+  }) => api.post<import('../types').ProjectCard>('/admin/project-cards', body),
+  update: (
+    id: number,
+    body: Partial<{
+      title: string;
+      description: string | null;
+      url: string;
+      active: boolean;
+      sort_order: number;
+      image_base64: string;
+      mime_type: string;
+    }>,
+  ) => api.put<import('../types').ProjectCard>(`/admin/project-cards/${id}`, body),
+  remove: (id: number) => api.delete(`/admin/project-cards/${id}`),
+};

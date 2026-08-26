@@ -27,6 +27,10 @@ The full My Life dashboard is available at `/admin` (not linked from the public 
 | Mål           | `/admin/mal`               | Life goals with progress                 |
 | Inställningar | `/admin/installningar`     | Profile, avatar, connection test         |
 | Tesla view    | `/admin/tesla`             | Mobile-optimized life overview           |
+| Digital Legacy| `/admin/arv`               | Dead man's switch / estate activation    |
+| Legacy portal | `/legacy`                  | Public one-time claim + legacy login     |
+
+See `docs/DIGITAL_LEGACY.md` for the full Digital Legacy Module design.
 
 ## Principles
 

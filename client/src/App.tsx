@@ -17,12 +17,21 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TeslaViewPage } from './pages/TeslaViewPage';
 import { LandingPage } from './pages/LandingPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
+import { DigitalLegacyPage } from './pages/DigitalLegacyPage';
+import { LegacyConfirmPage, LegacyPortalPage } from './pages/LegacyPortalPage';
+import { LegacyWelcomePage } from './pages/LegacyWelcomePage';
+import { LegacyInstructionsPage } from './pages/LegacyInstructionsPage';
+import { ProjectCardsAdminPage } from './pages/ProjectCardsAdminPage';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/legacy" element={<LegacyPortalPage />} />
+        <Route path="/legacy/confirm" element={<LegacyConfirmPage />} />
+        <Route path="/legacy/welcome" element={<LegacyWelcomePage />} />
+        <Route path="/legacy/instructions" element={<LegacyInstructionsPage />} />
         <Route path={ADMIN_LOGIN} element={<AdminLoginPage />} />
         <Route path={ADMIN_BASE} element={<AdminAuthGuard />}>
           <Route path="tesla" element={<TeslaViewPage />} />
@@ -38,6 +47,8 @@ export default function App() {
             <Route path="mat" element={<FoodPage />} />
             <Route path="taxi" element={<TaxiPage />} />
             <Route path="mal" element={<GoalsPage />} />
+            <Route path="arv" element={<DigitalLegacyPage />} />
+            <Route path="project-cards" element={<ProjectCardsAdminPage />} />
             <Route path="installningar" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to={ADMIN_BASE} replace />} />
           </Route>

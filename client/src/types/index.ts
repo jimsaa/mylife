@@ -510,3 +510,90 @@ export interface TeslaViewData {
     };
   };
 }
+
+/* ---- Digital Legacy ---- */
+
+export interface LegacyConfig {
+  id: number;
+  enabled: number;
+  check_interval_days: number;
+  reminder_1_days: number;
+  reminder_2_days: number;
+  activation_days: number;
+  token_lifetime_hours: number;
+  legacy_role: string;
+  public_base_url: string | null;
+  updated_at: string;
+}
+
+export interface LegacyContact {
+  id: number;
+  name: string;
+  relationship: string;
+  email: string;
+  activation_priority: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LegacyLifeState {
+  id: number;
+  last_confirmed_alive: string | null;
+  last_check_email_sent_at: string | null;
+  last_reminder_1_sent_at: string | null;
+  last_reminder_2_sent_at: string | null;
+  last_activation_sent_at: string | null;
+  status: string;
+  updated_at: string;
+}
+
+export interface LegacyStatus {
+  config: LegacyConfig;
+  state: LegacyLifeState;
+  contacts: LegacyContact[];
+  inactive_days: number | null;
+  owner_email_configured: boolean;
+  next_stage: string;
+}
+
+export interface LegacyAuditEntry {
+  id: number;
+  action: string;
+  actor: string;
+  contact_id: number | null;
+  detail: string | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface LegacyInstructionSection {
+  id: number;
+  title: string;
+  body: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LegacyWelcomeMessage {
+  id: number;
+  title: string;
+  body: string;
+  updated_at: string;
+}
+
+/* ---- Project Cards (public homepage) ---- */
+
+export interface ProjectCard {
+  id: number;
+  title: string;
+  description: string | null;
+  image_path: string;
+  image_url: string;
+  url: string;
+  active: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}

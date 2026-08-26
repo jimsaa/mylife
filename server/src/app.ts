@@ -18,6 +18,10 @@ import dailySleepCheckinRoutes from './routes/dailySleepCheckinRoutes.js';
 import teslaRoutes from './routes/teslaRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import legacyRoutes, { legacyPublicRouter } from './routes/legacyRoutes.js';
+import projectCardRoutes, {
+  projectCardsPublicRouter,
+} from './routes/projectCardRoutes.js';
 import { requireAdminAuth } from './middleware/requireAdminAuth.js';
 
 export function createApp() {
@@ -45,6 +49,11 @@ export function createApp() {
   });
 
   app.use('/api/auth', authRoutes);
+  // Digital Legacy public portal + cron (no admin session required)
+  app.use('/api/legacy/public', legacyPublicRouter);
+  // Project Cards — public read of active cards + images
+  app.use('/api/project-cards', projectCardsPublicRouter);
+
   app.use(requireAdminAuth);
 
   app.use('/api/dashboard', dashboardRoutes);
@@ -62,6 +71,8 @@ export function createApp() {
   app.use('/api/taxi', taxiRoutes);
   app.use('/api/goals', goalRoutes);
   app.use('/api/stats', statsRoutes);
+  app.use('/api/legacy', legacyRoutes);
+  app.use('/api/admin/project-cards', projectCardRoutes);
 
   return app;
 }
