@@ -5,6 +5,12 @@ const HARDCODED_CARDS = [
     url: 'https://discotaxi.se',
     image_url: '/project-cards/disco-taxi.png',
   },
+  {
+    id: 'haunted-sweden',
+    title: 'Haunted Sweden',
+    url: 'https://hauntedsweden.se',
+    image_url: '/project-cards/haunted-sweden.png',
+  },
 ] as const;
 
 /**
