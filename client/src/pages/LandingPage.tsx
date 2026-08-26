@@ -25,12 +25,9 @@ export function LandingPage() {
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:100%_4rem]" />
 
         <div className="relative text-center">
-          <h1 className="text-4xl font-semibold tracking-[0.35em] text-white sm:text-5xl md:text-6xl">
-            JIM SAARI
+          <h1 className="text-3xl font-semibold tracking-wide text-white sm:text-4xl md:text-5xl">
+            Jim Saari - This is My Life
           </h1>
-          <p className="mt-6 text-sm font-medium uppercase tracking-[0.45em] text-slate-400 sm:text-base">
-            Under Development
-          </p>
         </div>
       </section>
 
@@ -41,9 +38,9 @@ export function LandingPage() {
         <div className="mx-auto max-w-5xl">
           <h2
             id="project-cards-heading"
-            className="mb-8 text-center text-xs font-medium uppercase tracking-[0.35em] text-slate-500"
+            className="mb-8 text-center text-sm font-medium tracking-wide text-slate-400 sm:text-base"
           >
-            Projects
+            I&apos;m currently active in these projects
           </h2>
 
           <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 md:gap-5">
