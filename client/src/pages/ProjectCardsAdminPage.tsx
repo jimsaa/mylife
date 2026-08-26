@@ -250,6 +250,16 @@ export function ProjectCardsAdminPage() {
         }
       />
 
+      {isProductionHost() && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          You are on jimsaari.se. Saves need Vercel Blob storage, or use{' '}
+          <a className="font-medium underline" href="http://localhost:3006/admin/project-cards">
+            http://localhost:3006/admin/project-cards
+          </a>{' '}
+          with <code className="rounded bg-amber-100 px-1">npm run dev</code>.
+        </p>
+      )}
+
       {message && (
         <p className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900">
           {message}
