@@ -1,4 +1,9 @@
-const HARDCODED_CARDS = [
+const HARDCODED_CARDS: Array<{
+  id: string;
+  title: string;
+  url?: string;
+  image_url: string;
+}> = [
   {
     id: 'disco-taxi',
     title: 'Disco Taxi',
@@ -11,7 +16,33 @@ const HARDCODED_CARDS = [
     url: 'https://hauntedsweden.se',
     image_url: '/project-cards/haunted-sweden.png',
   },
-] as const;
+  {
+    id: 'my-books',
+    title: 'My Books - Coming Soon',
+    image_url: '/project-cards/my-books.png',
+  },
+];
+
+const cardShellClass =
+  'group block overflow-hidden rounded-xl border border-white/10 bg-slate-900/60 outline-none transition hover:border-teal-500/40 focus-visible:ring-2 focus-visible:ring-teal-400';
+
+function CardMedia({ title, image_url }: { title: string; image_url: string }) {
+  return (
+    <>
+      <div className="aspect-[4/5] overflow-hidden bg-slate-800">
+        <img
+          src={image_url}
+          alt={title}
+          className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+          loading="lazy"
+        />
+      </div>
+      <div className="px-3 py-3 sm:px-4 sm:py-3.5">
+        <h3 className="text-sm font-semibold tracking-wide text-white sm:text-base">{title}</h3>
+      </div>
+    </>
+  );
+}
 
 /**
  * Public homepage — hero + hardcoded project cards (static assets).
@@ -52,26 +83,20 @@ export function LandingPage() {
           <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 md:gap-5">
             {HARDCODED_CARDS.map((card) => (
               <li key={card.id}>
-                <a
-                  href={card.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group block overflow-hidden rounded-xl border border-white/10 bg-slate-900/60 outline-none transition hover:border-teal-500/40 focus-visible:ring-2 focus-visible:ring-teal-400"
-                >
-                  <div className="aspect-[4/5] overflow-hidden bg-slate-800">
-                    <img
-                      src={card.image_url}
-                      alt={card.title}
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
-                      loading="lazy"
-                    />
+                {card.url ? (
+                  <a
+                    href={card.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={cardShellClass}
+                  >
+                    <CardMedia title={card.title} image_url={card.image_url} />
+                  </a>
+                ) : (
+                  <div className={cardShellClass}>
+                    <CardMedia title={card.title} image_url={card.image_url} />
                   </div>
-                  <div className="px-3 py-3 sm:px-4 sm:py-3.5">
-                    <h3 className="text-sm font-semibold tracking-wide text-white sm:text-base">
-                      {card.title}
-                    </h3>
-                  </div>
-                </a>
+                )}
               </li>
             ))}
           </ul>
