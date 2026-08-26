@@ -13,9 +13,12 @@ interface FormState {
   url: string;
   active: boolean;
   sort_order: number;
-  image_base64?: string;
-  mime_type?: string;
   preview_url?: string;
+}
+
+interface PendingImage {
+  image_base64: string;
+  mime_type: string;
 }
 
 const emptyForm = (): FormState => ({
@@ -26,18 +29,36 @@ const emptyForm = (): FormState => ({
   sort_order: 0,
 });
 
-function readFileAsBase64(file: File): Promise<{ image_base64: string; mime_type: string }> {
+function mimeFromFile(file: File): string {
+  if (file.type && file.type.startsWith('image/')) return file.type;
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.webp')) return 'image/webp';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  return 'image/jpeg';
+}
+
+function readFileAsBase64(file: File): Promise<PendingImage> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = String(reader.result ?? '');
       const comma = result.indexOf(',');
       const image_base64 = comma >= 0 ? result.slice(comma + 1) : result;
-      resolve({ image_base64, mime_type: file.type || 'image/jpeg' });
+      if (!image_base64) {
+        reject(new Error('Could not read image data.'));
+        return;
+      }
+      resolve({ image_base64, mime_type: mimeFromFile(file) });
     };
     reader.onerror = () => reject(new Error('Could not read file'));
     reader.readAsDataURL(file);
   });
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return 'Save failed. Is the API server running (npm run dev)?';
 }
 
 export function ProjectCardsAdminPage() {
@@ -46,14 +67,20 @@ export function ProjectCardsAdminPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [readingImage, setReadingImage] = useState(false);
+  const [imageReady, setImageReady] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const pendingImageRef = useRef<PendingImage | null>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
 
   const load = async () => {
     try {
       setCards(await projectCardApi.listAdmin());
     } catch (err) {
       console.error(err);
-      setError('Could not load project cards.');
+      setError(
+        'Could not load project cards. Make sure the API is running (npm run dev) and you are logged in.',
+      );
     }
   };
 
@@ -61,7 +88,13 @@ export function ProjectCardsAdminPage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [error]);
+
   const openCreate = () => {
+    pendingImageRef.current = null;
+    setImageReady(false);
     const nextOrder =
       cards.length === 0 ? 1 : Math.max(...cards.map((c) => c.sort_order)) + 1;
     setEditing({ ...emptyForm(), sort_order: nextOrder });
@@ -70,6 +103,8 @@ export function ProjectCardsAdminPage() {
   };
 
   const openEdit = (card: ProjectCard) => {
+    pendingImageRef.current = null;
+    setImageReady(false);
     setEditing({
       id: card.id,
       title: card.title,
@@ -84,63 +119,91 @@ export function ProjectCardsAdminPage() {
   };
 
   const onFile = async (file: File | null) => {
-    if (!file || !editing) return;
+    if (!file) return;
+    setReadingImage(true);
+    setError(null);
     try {
-      const { image_base64, mime_type } = await readFileAsBase64(file);
-      setEditing({
-        ...editing,
-        image_base64,
-        mime_type,
-        preview_url: URL.createObjectURL(file),
-      });
-    } catch {
-      setError('Could not read image file.');
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error('File too large. Max 5 MB.');
+      }
+      const pending = await readFileAsBase64(file);
+      pendingImageRef.current = pending;
+      setImageReady(true);
+      setEditing((prev) =>
+        prev
+          ? {
+              ...prev,
+              preview_url: URL.createObjectURL(file),
+            }
+          : prev,
+      );
+    } catch (err) {
+      pendingImageRef.current = null;
+      setImageReady(false);
+      setError(errorMessage(err));
+    } finally {
+      setReadingImage(false);
     }
   };
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!editing) return;
-    if (!editing.title.trim() || !editing.url.trim()) {
+  const save = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!editing || saving) return;
+
+    const title = editing.title.trim();
+    const url = editing.url.trim();
+    if (!title || !url) {
       setError('Title and URL are required.');
       return;
     }
-    if (!editing.id && !editing.image_base64) {
-      setError('Image is required for new cards.');
+    if (!editing.id && !pendingImageRef.current) {
+      setError('Image is required for new cards. Choose a file first.');
       return;
     }
 
     setSaving(true);
     setError(null);
+    setMessage(null);
+
     try {
+      const imagePayload = pendingImageRef.current
+        ? {
+            image_base64: pendingImageRef.current.image_base64,
+            mime_type: pendingImageRef.current.mime_type,
+          }
+        : {};
+
       if (editing.id) {
         await projectCardApi.update(editing.id, {
-          title: editing.title,
-          description: editing.description || null,
-          url: editing.url,
+          title,
+          description: editing.description.trim() || null,
+          url,
           active: editing.active,
           sort_order: editing.sort_order,
-          ...(editing.image_base64 && editing.mime_type
-            ? { image_base64: editing.image_base64, mime_type: editing.mime_type }
-            : {}),
+          ...imagePayload,
         });
         setMessage('Project card updated.');
       } else {
         await projectCardApi.create({
-          title: editing.title,
-          description: editing.description || null,
-          url: editing.url,
+          title,
+          description: editing.description.trim() || null,
+          url,
           active: editing.active,
           sort_order: editing.sort_order,
-          image_base64: editing.image_base64!,
-          mime_type: editing.mime_type!,
+          image_base64: pendingImageRef.current!.image_base64,
+          mime_type: pendingImageRef.current!.mime_type,
         });
         setMessage('Project card created.');
       }
+
+      pendingImageRef.current = null;
+      setImageReady(false);
       setEditing(null);
+      if (fileRef.current) fileRef.current.value = '';
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed.');
+      console.error('Project card save failed:', err);
+      setError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -154,8 +217,8 @@ export function ProjectCardsAdminPage() {
       await projectCardApi.remove(card.id);
       setMessage('Project card deleted.');
       await load();
-    } catch {
-      setError('Delete failed.');
+    } catch (err) {
+      setError(errorMessage(err));
     }
   };
 
@@ -177,7 +240,11 @@ export function ProjectCardsAdminPage() {
         </p>
       )}
       {error && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p
+          ref={errorRef}
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          role="alert"
+        >
           {error}
         </p>
       )}
@@ -187,7 +254,13 @@ export function ProjectCardsAdminPage() {
           <h2 className="mb-4 text-base font-semibold">
             {editing.id ? 'Edit project card' : 'Add project card'}
           </h2>
-          <form className="grid max-w-xl gap-3" onSubmit={(e) => void save(e)}>
+          <form
+            className="grid max-w-xl gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save(e);
+            }}
+          >
             <Field label="Image">
               <div className="flex items-start gap-4">
                 <div className="aspect-[4/5] w-28 overflow-hidden rounded-lg border border-border bg-surface-muted">
@@ -207,11 +280,15 @@ export function ProjectCardsAdminPage() {
                   <input
                     ref={fileRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/webp"
+                    accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
                     className="text-sm"
                     onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
                   />
-                  <p className="mt-1 text-xs text-text-muted">PNG, JPG or WEBP · max 5 MB · 4:5 display</p>
+                  <p className="mt-1 text-xs text-text-muted">
+                    PNG, JPG or WEBP · max 5 MB · 4:5 display
+                    {readingImage ? ' · Reading image…' : ''}
+                    {imageReady ? ' · Image ready' : ''}
+                  </p>
                 </div>
               </div>
             </Field>
@@ -233,10 +310,11 @@ export function ProjectCardsAdminPage() {
 
             <Field label="Link">
               <Input
-                type="url"
+                type="text"
+                inputMode="url"
                 value={editing.url}
                 onChange={(e) => setEditing({ ...editing, url: e.target.value })}
-                placeholder="https://… or /path"
+                placeholder="https://example.com or /path"
                 required
               />
             </Field>
@@ -261,10 +339,18 @@ export function ProjectCardsAdminPage() {
             </Field>
 
             <div className="flex gap-2">
-              <Button type="submit" disabled={saving}>
+              <Button type="submit" disabled={saving || readingImage}>
                 {saving ? 'Saving…' : 'Save'}
               </Button>
-              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  pendingImageRef.current = null;
+                  setImageReady(false);
+                  setEditing(null);
+                }}
+              >
                 Cancel
               </Button>
             </div>
