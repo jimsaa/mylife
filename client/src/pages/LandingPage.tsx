@@ -13,7 +13,7 @@ const HARDCODED_CARDS = [
 export function LandingPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <section className="relative flex min-h-[70vh] items-center justify-center overflow-hidden px-6">
+      <section className="relative overflow-hidden px-6 pb-6 pt-16 sm:pt-20">
         <div
           className="pointer-events-none absolute inset-0"
           aria-hidden
@@ -33,12 +33,12 @@ export function LandingPage() {
 
       <section
         aria-labelledby="project-cards-heading"
-        className="relative border-t border-white/5 px-4 pb-20 pt-10 sm:px-6 lg:px-8"
+        className="relative px-4 pb-16 pt-4 sm:px-6 lg:px-8"
       >
         <div className="mx-auto max-w-5xl">
           <h2
             id="project-cards-heading"
-            className="mb-8 text-center text-sm font-medium tracking-wide text-slate-400 sm:text-base"
+            className="mb-6 text-center text-sm font-medium tracking-wide text-slate-400 sm:text-base"
           >
             I&apos;m currently active in these projects
           </h2>
