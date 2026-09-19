@@ -4,19 +4,11 @@
   "buildCommand": "npm run build",
   "outputDirectory": "client/dist",
   "functions": {
-    "api/auth/session.ts": {
+    "api/hpb-bets/[[...betNumber]].ts": {
       "includeFiles": "data/hpb-season-2026-27.json"
     }
   },
   "rewrites": [
-    {
-      "source": "/api/hpb-bets",
-      "destination": "/api/auth/session?resource=hpb-bets"
-    },
-    {
-      "source": "/api/hpb-bets/:betNumber",
-      "destination": "/api/auth/session?resource=hpb-bets&betNumber=:betNumber"
-    },
     {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
