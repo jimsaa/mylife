@@ -5,9 +5,9 @@
 import { access, mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { list, put } from '@vercel/blob';
-import { calculateAccruedSalary } from '../../server/src/lib/taxilog/calculations/payroll';
-import { calculateDailyFinancials } from '../../server/src/lib/taxilog/data/dailyFinancials';
-import { parseTaxiLogImport } from '../../server/src/lib/taxilog/import/taxilogImport';
+import { calculateAccruedSalary } from './taxilog/calculations/payroll';
+import { calculateDailyFinancials } from './taxilog/data/dailyFinancials';
+import { parseTaxiLogImport } from './taxilog/import/taxilogImport';
 import {
   buildDailyExportFromState,
   emptyTaxiLogState,
@@ -18,7 +18,7 @@ import {
   seedRealTaxiLogData,
   type DailyLogInput,
   type TaxiLogState,
-} from '../../server/src/lib/taxilog/service';
+} from './taxilog/service';
 
 const BLOB_PATH = 'taxi-log/state.json';
 const LOCAL_FALLBACK = path.join(process.cwd(), 'data', 'taxi-log-vercel.json');
@@ -83,8 +83,12 @@ async function saveState(state: TaxiLogState): Promise<void> {
 
 export async function getMonth(year: number, month: number) {
   const state = await loadState();
-  if (state.workDays.length > 0 && !(await hasPersisted())) {
-    await saveState(state);
+  try {
+    if (state.workDays.length > 0 && !(await hasPersisted())) {
+      await saveState(state);
+    }
+  } catch {
+    // Keep the overview readable if Blob is not configured yet.
   }
   return loadMonthOverviewFromState(state, year, month);
 }
