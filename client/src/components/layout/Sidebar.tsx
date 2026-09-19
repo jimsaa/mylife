@@ -43,10 +43,7 @@ export function Sidebar() {
       <div className="sticky top-0 flex h-screen flex-col">
         <div className={`border-b border-border ${collapsed ? 'px-2 py-4' : 'px-4 py-5'}`}>
           {!collapsed && (
-            <>
-              <p className="text-lg font-bold text-accent">{APP_NAME}</p>
-              <p className="text-xs text-text-muted">Ditt liv, lokalt</p>
-            </>
+            <p className="text-lg font-bold text-accent">{APP_NAME}</p>
           )}
           {collapsed && (
             <p className="text-center text-xs font-bold text-accent" title={APP_NAME}>
@@ -133,10 +130,7 @@ export function MobileHeader() {
     <div className="border-b border-border bg-surface px-4 py-3 md:hidden">
       <div className="flex items-center gap-3">
         <UserAvatar avatarUrl={profile?.avatar_url ?? '/jim-saari.jpg'} size="mobile" />
-        <div>
-          <p className="text-base font-bold text-accent">{APP_NAME}</p>
-          <p className="text-xs text-text-muted">Ditt liv, lokalt</p>
-        </div>
+        <p className="text-base font-bold text-accent">{APP_NAME}</p>
       </div>
     </div>
   );

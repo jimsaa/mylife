@@ -1,4 +1,4 @@
-export const APP_NAME = 'My Life';
+export const APP_NAME = 'My Life - Jim Saari';
 
 /** Base path for the private My Life dashboard (not linked from the public site). */
 export const ADMIN_BASE = '/admin';
