@@ -23,6 +23,7 @@ import { LegacyConfirmPage, LegacyPortalPage } from './pages/LegacyPortalPage';
 import { LegacyWelcomePage } from './pages/LegacyWelcomePage';
 import { LegacyInstructionsPage } from './pages/LegacyInstructionsPage';
 import { ProjectCardsAdminPage } from './pages/ProjectCardsAdminPage';
+import { HpbBetsResultsPage } from './pages/HpbBetsResultsPage';
 
 export default function App() {
   return (
@@ -48,6 +49,8 @@ export default function App() {
             <Route path="mat" element={<FoodPage />} />
             <Route path="taxi" element={<TaxiPage />} />
             <Route path="taxi/import" element={<TaxiImportPage />} />
+            <Route path="bets" element={<Navigate to={`${ADMIN_BASE}/bets/results`} replace />} />
+            <Route path="bets/results" element={<HpbBetsResultsPage />} />
             <Route path="mal" element={<GoalsPage />} />
             <Route path="arv" element={<DigitalLegacyPage />} />
             <Route path="project-cards" element={<ProjectCardsAdminPage />} />

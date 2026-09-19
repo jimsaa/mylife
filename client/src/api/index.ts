@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { HpbBet, HpbResultStats } from '../lib/hpb-bets/display';
 import type {
   CalendarEvent,
   DailyNote,
@@ -318,6 +319,36 @@ export const legacyApi = {
       '/legacy/instructions/reorder',
       { ordered_ids },
     ),
+};
+
+/** HPB Bets → Results. Private; requires admin session. */
+export type HpbBetsPayload = {
+  seasonId: string;
+  startingBankroll: number;
+  bets: HpbBet[];
+  stats: HpbResultStats & {
+    wins: number;
+    losses: number;
+    pending: number;
+    voids: number;
+    totalBets: number;
+  };
+  bet?: HpbBet;
+};
+
+export const hpbBetsApi = {
+  list: () => api.get<HpbBetsPayload>('/hpb-bets'),
+  get: (betNumber: number) => api.get<HpbBetsPayload>(`/hpb-bets/${betNumber}`),
+  settle: (
+    betNumber: number,
+    body: {
+      result: 'win' | 'loss' | 'void';
+      actual_score?: string | null;
+      notes?: string | null;
+      read_quality_score?: 1 | 2 | 3 | 4 | 5 | null;
+      payout_sek?: number | null;
+    },
+  ) => api.patch<HpbBetsPayload>(`/hpb-bets/${betNumber}`, body),
 };
 
 /** Project Cards — public homepage + admin CRUD */

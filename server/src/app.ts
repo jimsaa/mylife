@@ -12,6 +12,7 @@ import sleepRoutes from './routes/sleepRoutes.js';
 import foodRoutes from './routes/foodRoutes.js';
 import taxiRoutes from './routes/taxiRoutes.js';
 import taxiLogRoutes from './routes/taxiLogRoutes.js';
+import hpbBetsRoutes from './routes/hpbBetsRoutes.js';
 import goalRoutes from './routes/goalRoutes.js';
 import statsRoutes from './routes/statsRoutes.js';
 import sleepImportRoutes from './routes/sleepImportRoutes.js';
@@ -71,6 +72,7 @@ export function createApp() {
   app.use('/api/food', foodRoutes);
   app.use('/api/taxi', taxiRoutes);
   app.use('/api/taxi-log', taxiLogRoutes);
+  app.use('/api/hpb-bets', hpbBetsRoutes);
   app.use('/api/goals', goalRoutes);
   app.use('/api/stats', statsRoutes);
   app.use('/api/legacy', legacyRoutes);

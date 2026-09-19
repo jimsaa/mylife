@@ -12,6 +12,7 @@
     "migrate": "npm run migrate --prefix server",
     "seed": "npm run seed --prefix server",
     "test": "npm test --prefix server",
+    "test:hpb-bets": "npm run test:hpb-bets --prefix server",
     "test:samsung-sleep": "npm run test:samsung-sleep --prefix server",
     "setup": "npm install && npm install --prefix client && npm install --prefix server && npm run migrate && npm run seed"
   },

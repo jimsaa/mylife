@@ -8,6 +8,11 @@ export const NAV_ITEMS = [
   { path: ADMIN_BASE, label: 'Översikt' },
   { path: `${ADMIN_BASE}/poc-weight-loss`, label: 'POC - Weight Loss' },
   { path: `${ADMIN_BASE}/taxi`, label: 'Taxi' },
+  {
+    path: `${ADMIN_BASE}/bets/results`,
+    label: 'Bets',
+    children: [{ path: `${ADMIN_BASE}/bets/results`, label: 'Results' }],
+  },
   { path: `${ADMIN_BASE}/kalender`, label: 'Kalender' },
   { path: `${ADMIN_BASE}/tid`, label: 'Tid' },
   { path: `${ADMIN_BASE}/projekt`, label: 'Projekt' },

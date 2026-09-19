@@ -82,6 +82,23 @@ export function Sidebar() {
                 >
                   {collapsed ? item.label.charAt(0) : item.label}
                 </NavLink>
+                {!collapsed && 'children' in item && item.children
+                  ? item.children.map((child) => (
+                      <NavLink
+                        key={child.path}
+                        to={child.path}
+                        className={({ isActive }) =>
+                          `mt-1 block rounded-lg px-3 py-1.5 pl-6 text-xs transition ${
+                            isActive
+                              ? 'bg-teal-50 font-medium text-accent'
+                              : 'text-text-muted hover:bg-surface-muted hover:text-text'
+                          }`
+                        }
+                      >
+                        {child.label}
+                      </NavLink>
+                    ))
+                  : null}
               </li>
             ))}
           </ul>
