@@ -3,6 +3,11 @@
   "installCommand": "npm install && npm install --prefix client",
   "buildCommand": "npm run build",
   "outputDirectory": "client/dist",
+  "functions": {
+    "api/hpb-bets/[[...betNumber]].ts": {
+      "includeFiles": "data/hpb-season-2026-27.json"
+    }
+  },
   "rewrites": [
     {
       "source": "/((?!api/).*)",

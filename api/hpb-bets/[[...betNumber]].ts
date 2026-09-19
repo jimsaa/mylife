@@ -3,8 +3,10 @@ import { findBet, HpbBetsError, loadHpbBets, settlePendingBet } from '../_lib/hp
 import type { HpbSettleInput } from '../_lib/hpb-bets/types';
 import { methodNotAllowed, readJsonBody, requireAdmin } from '../_lib/vercel-http';
 
-function parseBetNumber(value: string | string[] | undefined): number {
+function parseBetNumber(value: string | string[] | undefined): number | null {
+  if (value == null || value === '') return null;
   const raw = Array.isArray(value) ? value[0] : value;
+  if (raw == null || raw === '') return null;
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) {
     throw new HpbBetsError(400, 'Bet ID must be a positive integer.');
@@ -51,6 +53,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const betNumber = parseBetNumber(req.query.betNumber);
 
+    if (betNumber == null) {
+      if (req.method !== 'GET') {
+        methodNotAllowed(res, ['GET']);
+        return;
+      }
+      res.status(200).json(await loadHpbBets());
+      return;
+    }
+
     if (req.method === 'GET') {
       const payload = await loadHpbBets();
       const bet = findBet(payload.bets, betNumber);
@@ -75,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(error.status).json({ error: error.message });
       return;
     }
-    const message = error instanceof Error ? error.message : 'Failed to update bet.';
+    const message = error instanceof Error ? error.message : 'Failed to load bets.';
     res.status(500).json({ error: message });
   }
 }
