@@ -6,6 +6,8 @@ export const ADMIN_LOGIN = `${ADMIN_BASE}/login`;
 
 export const NAV_ITEMS = [
   { path: ADMIN_BASE, label: 'Översikt' },
+  { path: `${ADMIN_BASE}/poc-weight-loss`, label: 'POC - Weight Loss' },
+  { path: `${ADMIN_BASE}/taxi`, label: 'Taxi' },
   { path: `${ADMIN_BASE}/kalender`, label: 'Kalender' },
   { path: `${ADMIN_BASE}/tid`, label: 'Tid' },
   { path: `${ADMIN_BASE}/projekt`, label: 'Projekt' },
@@ -14,7 +16,6 @@ export const NAV_ITEMS = [
   { path: `${ADMIN_BASE}/valbefinnande`, label: 'Välbefinnande' },
   { path: `${ADMIN_BASE}/somn`, label: 'Sömn' },
   { path: `${ADMIN_BASE}/mat`, label: 'Mat' },
-  { path: `${ADMIN_BASE}/taxi`, label: 'Taxi' },
   { path: `${ADMIN_BASE}/mal`, label: 'Mål' },
   { path: `${ADMIN_BASE}/arv`, label: 'Digital Legacy' },
   { path: `${ADMIN_BASE}/project-cards`, label: 'Project Cards' },
