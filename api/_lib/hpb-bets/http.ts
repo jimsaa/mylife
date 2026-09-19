@@ -10,7 +10,7 @@ function firstQuery(value: string | string[] | undefined): string | undefined {
 
 function parseBetNumber(value: string | string[] | undefined): number | null {
   const raw = firstQuery(value);
-  if (raw == null || raw === '') return null;
+  if (raw == null || raw === '' || raw === '_') return null;
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) {
     throw new HpbBetsError(400, 'Bet ID must be a positive integer.');
