@@ -12,6 +12,7 @@ import { WellbeingPage } from './pages/WellbeingPage';
 import { SleepPage } from './pages/SleepPage';
 import { FoodPage } from './pages/FoodPage';
 import { TaxiPage } from './pages/TaxiPage';
+import { TaxiImportPage } from './pages/TaxiImportPage';
 import { GoalsPage } from './pages/GoalsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TeslaViewPage } from './pages/TeslaViewPage';
@@ -46,6 +47,7 @@ export default function App() {
             <Route path="somn" element={<SleepPage />} />
             <Route path="mat" element={<FoodPage />} />
             <Route path="taxi" element={<TaxiPage />} />
+            <Route path="taxi/import" element={<TaxiImportPage />} />
             <Route path="mal" element={<GoalsPage />} />
             <Route path="arv" element={<DigitalLegacyPage />} />
             <Route path="project-cards" element={<ProjectCardsAdminPage />} />

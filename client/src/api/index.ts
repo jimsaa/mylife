@@ -11,6 +11,8 @@ import type {
   StatsSummary,
   StatsTrends,
   TaxiData,
+  TaxiLogMonth,
+  TaxiLogParseResult,
   TaxiShift,
   TimeEntry,
   TimerStatus,
@@ -149,6 +151,27 @@ export const taxiApi = {
   create: (data: Partial<TaxiShift>) => api.post<TaxiShift>('/taxi', data),
   update: (id: number, data: Partial<TaxiShift>) => api.put<TaxiShift>(`/taxi/${id}`, data),
   delete: (id: number) => api.delete(`/taxi/${id}`),
+};
+
+export const taxiLogApi = {
+  month: (year: number, month: number) =>
+    api.get<TaxiLogMonth>(`/taxi-log/month?year=${year}&month=${month}`),
+  day: (date: string) =>
+    api.get<{ day: TaxiLogMonth['days'][number] | null; exportText: string | null }>(
+      `/taxi-log/day?date=${date}`,
+    ),
+  parse: (text: string) => api.post<TaxiLogParseResult>('/taxi-log/parse', { text }),
+  saveDay: (data: {
+    date: string;
+    grossIncome: string;
+    tips: string;
+    workedHours: string;
+    chargingKwh: string;
+  }) =>
+    api.post<{ day: TaxiLogMonth['days'][number] | null; exportText: string | null }>(
+      '/taxi-log/day',
+      data,
+    ),
 };
 
 export const goalApi = {

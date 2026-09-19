@@ -8,11 +8,13 @@
     "start": "tsx src/index.ts",
     "migrate": "tsx src/db/migrate.ts",
     "seed": "tsx src/db/seeds/run.ts",
+    "test": "tsx --test src/lib/taxilog/calculations/vat.test.ts src/lib/taxilog/calculations/work.test.ts src/lib/taxilog/calculations/income.test.ts src/lib/taxilog/calculations/charging.test.ts src/lib/taxilog/calculations/metrics.test.ts src/lib/taxilog/calculations/workDay.test.ts src/lib/taxilog/calculations/payroll.test.ts src/lib/taxilog/export/taxilog.test.ts src/lib/taxilog/data/dailyFinancials.test.ts src/lib/taxilog/import/taxilogImport.test.ts src/lib/taxilog/month/chartDays.test.ts src/lib/taxilog/service.test.ts",
     "test:samsung-sleep": "tsx scripts/test-samsung-sleep.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "cors": "^2.8.5",
+    "decimal.js": "^10.6.0",
     "express": "^4.21.2",
     "tesseract.js": "^7.0.0"
   },

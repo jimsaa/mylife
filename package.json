@@ -11,6 +11,7 @@
     "preview": "npm run preview --prefix client",
     "migrate": "npm run migrate --prefix server",
     "seed": "npm run seed --prefix server",
+    "test": "npm test --prefix server",
     "test:samsung-sleep": "npm run test:samsung-sleep --prefix server",
     "setup": "npm install && npm install --prefix client && npm install --prefix server && npm run migrate && npm run seed"
   },
@@ -20,6 +21,7 @@
     "concurrently": "^9.1.2"
   },
   "dependencies": {
-    "@vercel/blob": "^2.8.0"
+    "@vercel/blob": "^2.8.0",
+    "decimal.js": "^10.6.0"
   }
 }

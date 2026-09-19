@@ -339,6 +339,53 @@ export interface FoodEntry {
   created_at: string;
 }
 
+export interface TaxiLogDay {
+  date: string;
+  grossIncome: string;
+  netIncome: string;
+  vatAmount?: string;
+  vatRate?: string;
+  tips: string;
+  workedHours: string;
+  chargingKwh: string;
+}
+
+export interface TaxiLogMonth {
+  year: number;
+  month: number;
+  periodStart: string;
+  periodEnd: string;
+  grossIncome: string;
+  vatAmount: string;
+  netIncome: string;
+  tips: string;
+  workedHours: string;
+  chargingKwh: string;
+  accruedSalary: string;
+  salaryPaid: string;
+  salaryRemaining: string;
+  salaryStatus: string;
+  salaryStatusLabel: string;
+  days: TaxiLogDay[];
+}
+
+export interface TaxiLogParseResult {
+  parsed: {
+    date: string;
+    grossIncome: string;
+    tips: string;
+    workedHours: string;
+    chargingKwh: string;
+  };
+  preview: {
+    grossIncome: string;
+    vatAmount: string;
+    netIncome: string;
+    tips: string;
+    estimatedSalary: string;
+  };
+}
+
 export interface TaxiShift {
   id: number;
   shift_date: string;
