@@ -1,11 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { findBet, HpbBetsError, loadHpbBets, settlePendingBet } from '../_lib/hpb-bets/service';
-import type { HpbSettleInput } from '../_lib/hpb-bets/types';
-import { methodNotAllowed, readJsonBody, requireAdmin } from '../_lib/vercel-http';
+import { findBet, HpbBetsError, loadHpbBets, settlePendingBet } from './service';
+import type { HpbSettleInput } from './types';
+import { methodNotAllowed, readJsonBody, requireAdmin } from '../vercel-http';
+
+function firstQuery(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
 
 function parseBetNumber(value: string | string[] | undefined): number | null {
-  if (value == null || value === '') return null;
-  const raw = Array.isArray(value) ? value[0] : value;
+  const raw = firstQuery(value);
   if (raw == null || raw === '') return null;
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) {
@@ -47,7 +51,8 @@ function parseSettleBody(body: Record<string, unknown>): HpbSettleInput {
   return { result, actual_score: score, notes, read_quality_score, payout_sek };
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+/** Shared GET/PATCH handler for /api/hpb-bets (Hobby plan cannot add another lambda). */
+export async function handleHpbBetsRequest(req: VercelRequest, res: VercelResponse) {
   if (!requireAdmin(req, res)) return;
 
   try {
