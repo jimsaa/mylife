@@ -56,7 +56,7 @@ export function Sidebar() {
 
           <div className={`flex justify-center ${collapsed ? 'mt-3' : 'mt-4'}`}>
             <UserAvatar
-              avatarUrl={profile?.avatar_url ?? null}
+              avatarUrl={profile?.avatar_url ?? '/jim-saari.jpg'}
               size={collapsed ? 'sidebar-collapsed' : 'sidebar'}
             />
           </div>
@@ -115,7 +115,7 @@ export function MobileHeader() {
   return (
     <div className="border-b border-border bg-surface px-4 py-3 md:hidden">
       <div className="flex items-center gap-3">
-        <UserAvatar avatarUrl={profile?.avatar_url ?? null} size="mobile" />
+        <UserAvatar avatarUrl={profile?.avatar_url ?? '/jim-saari.jpg'} size="mobile" />
         <div>
           <p className="text-base font-bold text-accent">{APP_NAME}</p>
           <p className="text-xs text-text-muted">Ditt liv, lokalt</p>

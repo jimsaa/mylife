@@ -1,5 +1,6 @@
 import { getDb } from '../connection.js';
 import { runMigrations } from '../migrate.js';
+import { importDefaultPocWeightLossData } from '../../lib/poc-weight-loss/importPocData.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -54,18 +55,31 @@ export function runSeeds(): void {
     upsertSetting.run(key, value);
   }
 
-  const avatarFile = path.resolve(__dirname, '../../data/avatars/avatar.png');
-  const currentAvatar = db.prepare(`SELECT value FROM settings WHERE key = 'avatar_path'`).get() as
-    | { value: string }
-    | undefined;
-  if (fs.existsSync(avatarFile) && !currentAvatar?.value) {
+  const avatarJpg = path.resolve(__dirname, '../../data/avatars/avatar.jpg');
+  const avatarPng = path.resolve(__dirname, '../../data/avatars/avatar.png');
+  const avatarRelative = fs.existsSync(avatarJpg)
+    ? 'avatars/avatar.jpg'
+    : fs.existsSync(avatarPng)
+      ? 'avatars/avatar.png'
+      : null;
+  if (avatarRelative) {
     db.prepare(
       `INSERT INTO settings (key, value, updated_at) VALUES ('avatar_path', ?, datetime('now'))
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
-    ).run('avatars/avatar.png');
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+    ).run(avatarRelative);
   }
 
   console.log('Default settings ensured.');
+
+  try {
+    const imported = importDefaultPocWeightLossData(db);
+    console.log(
+      `POC Weight Loss import: inserted ${imported.logsInserted}, skipped ${imported.logsSkipped}, days ${imported.days.join(",")}`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`POC Weight Loss import skipped: ${message}`);
+  }
 }
 
 const isMain = process.argv[1]?.includes('seeds');

@@ -50,7 +50,18 @@ function CardMedia({ title, image_url }: { title: string; image_url: string }) {
 export function LandingPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <section className="relative overflow-hidden px-6 pb-6 pt-16 sm:pt-20">
+      <header className="relative z-10 flex items-center gap-3 border-b border-white/5 px-4 py-3 sm:px-6">
+        <img
+          src="/jim-saari.jpg"
+          alt="Jim Saari"
+          className="h-10 w-10 rounded-full object-cover ring-2 ring-white/20 sm:h-11 sm:w-11"
+        />
+        <span className="text-sm font-medium tracking-wide text-slate-300 sm:text-base">
+          Jim Saari
+        </span>
+      </header>
+
+      <section className="relative overflow-hidden px-6 pb-6 pt-10 sm:pt-14">
         <div
           className="pointer-events-none absolute inset-0"
           aria-hidden

@@ -31,7 +31,7 @@ export function UserAvatar({
         <img
           src={avatarUrl}
           alt="Profilbild"
-          className="h-full w-full object-contain"
+          className="h-full w-full object-cover"
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-teal-50 to-slate-100 text-xs font-medium text-text-muted">
