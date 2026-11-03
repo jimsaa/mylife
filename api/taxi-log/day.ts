@@ -19,6 +19,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         chargingKwh?: string;
         ownBookings?: string | null;
         otherIncome?: string | null;
+        handUp?: string | null;
+        uberIncome?: string | null;
+        boltIncome?: string | null;
         bonus?: string | null;
       }>(req);
       res.status(201).json(
@@ -27,9 +30,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           grossIncome: String(body.grossIncome ?? ''),
           tips: String(body.tips ?? '0'),
           workedHours: String(body.workedHours ?? '0'),
-          chargingKwh: String(body.chargingKwh ?? '0'),
+          chargingKwh: body.chargingKwh === undefined || body.chargingKwh === null || body.chargingKwh === ''
+            ? undefined
+            : String(body.chargingKwh),
           ownBookings: body.ownBookings,
           otherIncome: body.otherIncome,
+          handUp: body.handUp,
+          uberIncome: body.uberIncome,
+          boltIncome: body.boltIncome,
           bonus: body.bonus,
         }),
       );

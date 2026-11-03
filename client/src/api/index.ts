@@ -167,9 +167,12 @@ export const taxiLogApi = {
     grossIncome: string;
     tips: string;
     workedHours: string;
-    chargingKwh: string;
+    chargingKwh?: string;
     ownBookings?: string | null;
     otherIncome?: string | null;
+    handUp?: string | null;
+    uberIncome?: string | null;
+    boltIncome?: string | null;
     bonus?: string | null;
   }) =>
     api.post<{ day: TaxiLogMonth['days'][number] | null; exportText: string | null }>(

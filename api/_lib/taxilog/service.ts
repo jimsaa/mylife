@@ -16,6 +16,13 @@ import {
   yearMonthFromDate,
 } from "./calculations/period";
 import { CalculationError } from "./calculations/errors";
+import {
+  isV3Categorized,
+  perHour,
+  sharePercent,
+  sumTotalIncome,
+  uncategorizedDrivingGross,
+} from "./calculations/incomeSources";
 import { toMoney } from "./calculations/money";
 import {
   bonusSourceKey,
@@ -44,6 +51,9 @@ export type TaxiWorkDayRecord = {
   totalIncome: string;
   ownBookings: string | null;
   otherIncome: string | null;
+  handUp: string | null;
+  uberIncome: string | null;
+  boltIncome: string | null;
   tips: string;
   bonus: string | null;
   vatRate: string;
@@ -106,9 +116,12 @@ export type DailyLogInput = {
   grossIncome: string;
   tips: string;
   workedHours: string;
-  chargingKwh: string;
+  chargingKwh?: string;
   ownBookings?: string | null;
   otherIncome?: string | null;
+  handUp?: string | null;
+  uberIncome?: string | null;
+  boltIncome?: string | null;
   bonus?: string | null;
 };
 
@@ -129,6 +142,9 @@ export function normalizeTaxiLogState(raw: TaxiLogState): TaxiLogState {
     ...day,
     ownBookings: day.ownBookings ?? null,
     otherIncome: day.otherIncome ?? null,
+    handUp: day.handUp ?? null,
+    uberIncome: day.uberIncome ?? null,
+    boltIncome: day.boltIncome ?? null,
     bonus: day.bonus ?? null,
   }));
   const payrolls = (raw.payrolls ?? []).map((payroll) => ({
@@ -270,10 +286,12 @@ export function saveDailyLogToState(state: TaxiLogState, input: DailyLogInput): 
     vatRate,
   });
   const workedHours = parseWorkedHours(input.workedHours);
-  const kwh = parseChargingKwh(input.chargingKwh);
   const bonus = input.bonus === undefined ? null : financials.bonus.toFixed(2);
   const ownBookings = input.ownBookings === undefined ? null : input.ownBookings;
   const otherIncome = input.otherIncome === undefined ? null : input.otherIncome;
+  const handUp = input.handUp === undefined ? null : input.handUp;
+  const uberIncome = input.uberIncome === undefined ? null : input.uberIncome;
+  const boltIncome = input.boltIncome === undefined ? null : input.boltIncome;
 
   const workDay: TaxiWorkDayRecord = {
     date: input.date,
@@ -281,6 +299,9 @@ export function saveDailyLogToState(state: TaxiLogState, input: DailyLogInput): 
     totalIncome: financials.totalIncome.toFixed(2),
     ownBookings,
     otherIncome,
+    handUp,
+    uberIncome,
+    boltIncome,
     tips: financials.tips.toFixed(2),
     bonus,
     vatRate: financials.vatRate.toString(),
@@ -291,22 +312,27 @@ export function saveDailyLogToState(state: TaxiLogState, input: DailyLogInput): 
     numberOfTrips: 0,
   };
 
-  const charging: TaxiChargingRecord = {
-    date: input.date,
-    kwh: kwh.toString(),
-    location: HOME_CHARGING_LOCATION,
-  };
+  let charging = normalized.charging.filter(
+    (session) => !(session.date === input.date && session.location === HOME_CHARGING_LOCATION),
+  );
+  if (input.chargingKwh !== undefined && input.chargingKwh !== "") {
+    charging = [
+      ...charging,
+      {
+        date: input.date,
+        kwh: parseChargingKwh(input.chargingKwh).toString(),
+        location: HOME_CHARGING_LOCATION,
+      },
+    ];
+  } else {
+    charging = normalized.charging;
+  }
 
   const next: TaxiLogState = applyDaySavings(
     {
       ...normalized,
       workDays: [...normalized.workDays.filter((day) => day.date !== input.date), workDay],
-      charging: [
-        ...normalized.charging.filter(
-          (session) => !(session.date === input.date && session.location === HOME_CHARGING_LOCATION),
-        ),
-        charging,
-      ],
+      charging,
     },
     input.date,
     financials.tips.toFixed(2),
@@ -327,18 +353,26 @@ export function loadDailyLogFromState(state: TaxiLogState, date: string) {
     return null;
   }
 
+  const bonus = workDay?.bonus ?? null;
+  const tips = workDay?.tips ?? "0";
+  const grossIncome = workDay?.totalIncome ?? "0";
   return {
     date,
-    grossIncome: workDay?.totalIncome ?? "0",
+    grossIncome,
     ownBookings: workDay?.ownBookings ?? null,
     otherIncome: workDay?.otherIncome ?? null,
+    handUp: workDay?.handUp ?? null,
+    uberIncome: workDay?.uberIncome ?? null,
+    boltIncome: workDay?.boltIncome ?? null,
     netIncome: workDay?.incomeExVat ?? "0",
     vatAmount: workDay?.vatAmount ?? "0",
     vatRate: workDay?.vatRate ?? normalized.vatRate,
-    tips: workDay?.tips ?? "0",
-    bonus: workDay?.bonus ?? null,
+    tips,
+    bonus,
+    totalIncome: sumTotalIncome(grossIncome, bonus ?? "0", tips).totalIncome.toFixed(2),
     workedHours: workDay?.workHours ?? "0",
     chargingKwh: charging?.kwh ?? "0",
+    sourceCategorized: workDay ? isV3Categorized(workDay) : false,
   };
 }
 
@@ -385,7 +419,21 @@ export function loadMonthOverviewFromState(
   );
   const own = sumKnown(workDays.map((day) => day.ownBookings));
   const other = sumKnown(workDays.map((day) => day.otherIncome));
+  const handUp = sumKnown(workDays.map((day) => day.handUp));
+  const uberIncome = sumKnown(workDays.map((day) => day.uberIncome));
+  const boltIncome = sumKnown(workDays.map((day) => day.boltIncome));
   const bonus = sumKnown(workDays.map((day) => day.bonus));
+  const categorizedDays = workDays.filter(isV3Categorized);
+  const categorizedOwn = sumKnown(categorizedDays.map((day) => day.ownBookings));
+  const categorizedHandUp = sumKnown(categorizedDays.map((day) => day.handUp));
+  const categorizedUber = sumKnown(categorizedDays.map((day) => day.uberIncome));
+  const categorizedBolt = sumKnown(categorizedDays.map((day) => day.boltIncome));
+  const categorizedGross = categorizedDays.reduce(
+    (sum, day) => sum.plus(day.totalIncome || 0),
+    new Decimal(0),
+  );
+  const uncategorizedGross = uncategorizedDrivingGross(workDays);
+  const hours = payroll.totalWorkHours;
   const liveSplit = projectSalarySplit(payroll.accruedSalary);
   const existing = normalized.payrolls.find((row) => row.year === year && row.month === month);
   const savings = summarizeSavings(normalized.savingsLedger, year, month);
@@ -433,6 +481,26 @@ export function loadMonthOverviewFromState(
     grossIncome: payroll.totalIncome.toString(),
     ownBookings: own.value,
     otherIncome: other.value,
+    handUp: handUp.value,
+    uberIncome: uberIncome.value,
+    boltIncome: boltIncome.value,
+    totalIncome: sumTotalIncome(payroll.totalIncome, bonus.value ?? "0", payroll.totalTips).totalIncome.toFixed(2),
+    uncategorizedGross,
+    sourceShares: {
+      ownBookings: sharePercent(categorizedOwn.value, categorizedGross),
+      handUp: sharePercent(categorizedHandUp.value, categorizedGross),
+      uberIncome: sharePercent(categorizedUber.value, categorizedGross),
+      boltIncome: sharePercent(categorizedBolt.value, categorizedGross),
+    },
+    incomePerHour: {
+      driving: perHour(payroll.totalIncome, hours),
+      ownBookings: perHour(own.value, hours),
+      handUp: perHour(handUp.value, hours),
+      uberIncome: perHour(uberIncome.value, hours),
+      boltIncome: perHour(boltIncome.value, hours),
+      bonus: perHour(bonus.value, hours),
+      tips: perHour(payroll.totalTips, hours),
+    },
     vatAmount: payroll.totalVat.toString(),
     netIncome: payroll.totalIncomeExVat.toString(),
     tips: payroll.totalTips.toString(),
@@ -479,11 +547,16 @@ export function loadMonthOverviewFromState(
       grossIncome: day.totalIncome,
       ownBookings: day.ownBookings,
       otherIncome: day.otherIncome,
+      handUp: day.handUp,
+      uberIncome: day.uberIncome,
+      boltIncome: day.boltIncome,
       netIncome: day.incomeExVat,
       tips: day.tips,
       bonus: day.bonus,
+      totalIncome: sumTotalIncome(day.totalIncome, day.bonus ?? "0", day.tips).totalIncome.toFixed(2),
       workedHours: day.workHours,
       chargingKwh: chargingByDate.get(day.date) ?? "0",
+      sourceCategorized: isV3Categorized(day),
     })),
   };
 }
@@ -494,15 +567,19 @@ export function buildDailyExportFromState(state: TaxiLogState, date: string): st
     return null;
   }
   const exportInput: TaxiLogDailyImport = {
-    version: log.ownBookings !== null || log.bonus ? "2" : "1",
+    version: log.sourceCategorized ? "3" : log.ownBookings !== null || log.bonus ? "2" : "1",
     date: log.date,
     grossIncome: log.grossIncome,
     ownBookings: log.ownBookings,
     otherIncome: log.otherIncome,
+    handUp: log.handUp,
+    uberIncome: log.uberIncome,
+    boltIncome: log.boltIncome,
     tips: log.tips,
     bonus: log.bonus ?? "0",
     workedHours: log.workedHours,
     chargingKwh: log.chargingKwh,
+    totalIncome: log.totalIncome,
   };
   return formatDailyExport(exportInput);
 }
@@ -693,16 +770,22 @@ export function previewImport(state: TaxiLogState, parsed: TaxiLogDailyImport) {
     bonus: parsed.bonus,
     vatRate: state.vatRate || DEFAULT_VAT_RATE,
   });
+  const totals = sumTotalIncome(financials.totalIncome, financials.bonus, financials.tips);
   return {
     parsed,
     preview: {
       grossIncome: financials.totalIncome.toString(),
       ownBookings: parsed.ownBookings,
       otherIncome: parsed.otherIncome,
+      handUp: parsed.handUp,
+      uberIncome: parsed.uberIncome,
+      boltIncome: parsed.boltIncome,
       vatAmount: financials.vatAmount.toFixed(2),
       netIncome: financials.incomeExVat.toFixed(2),
       tips: financials.tips.toFixed(2),
       bonus: financials.bonus.toFixed(2),
+      totalIncome: totals.totalIncome.toFixed(2),
+      workedHours: parsed.workedHours,
       estimatedSalary: calculateAccruedSalary(financials.incomeExVat).toFixed(2),
       savingsFromDay: financials.tips.plus(financials.bonus).toFixed(2),
     },

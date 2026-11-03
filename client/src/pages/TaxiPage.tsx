@@ -12,9 +12,11 @@ import {
   buildMonthChartDays,
   formatDateTitleSv,
   formatHoursValue,
+  formatIncomeSource,
   formatKwhValue,
   formatMonthHeadingSv,
   formatSek,
+  formatSharePercent,
   nextYearMonth,
   previousYearMonth,
 } from '../lib/taxilogDisplay';
@@ -205,14 +207,15 @@ export function TaxiPage() {
             <Card title="Vald dag" className="mb-6">
               <p className="mb-4 text-xl font-semibold">{formatDateTitleSv(selectedDate)}</p>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <StatCard label="INKÖRT BRUTTO" value={formatSek(selectedDay?.grossIncome ?? '0')} />
-                <StatCard label="EGNA BOKNINGAR" value={formatSek(selectedDay?.ownBookings)} />
-                <StatCard label="ÖVRIGA KÖRNINGAR" value={formatSek(selectedDay?.otherIncome)} />
-                <StatCard label="INKÖRT NETTO" value={formatSek(selectedDay?.netIncome ?? '0')} />
+                <StatCard label="EGNA BOKNINGAR" value={formatIncomeSource(selectedDay?.ownBookings)} />
+                <StatCard label="HAND UP" value={formatIncomeSource(selectedDay?.handUp)} />
+                <StatCard label="UBER" value={formatIncomeSource(selectedDay?.uberIncome)} />
+                <StatCard label="BOLT" value={formatIncomeSource(selectedDay?.boltIncome)} />
+                <StatCard label="KÖRINTÄKTER TOTALT" value={formatSek(selectedDay?.grossIncome ?? '0')} />
+                <StatCard label="BONUS" value={formatIncomeSource(selectedDay?.bonus)} />
                 <StatCard label="DRICKS" value={formatSek(selectedDay?.tips ?? '0')} />
-                <StatCard label="BONUS" value={formatSek(selectedDay?.bonus)} />
+                <StatCard label="TOTAL INKOMST" value={formatSek(selectedDay?.totalIncome ?? selectedDay?.grossIncome ?? '0')} />
                 <StatCard label="ARBETAD TID" value={formatHoursValue(selectedDay?.workedHours ?? '0')} />
-                <StatCard label="LADDNING" value={formatKwhValue(selectedDay?.chargingKwh ?? '0')} />
               </div>
               {exportText ? (
                 <div className="mt-4">
@@ -223,12 +226,15 @@ export function TaxiPage() {
           ) : null}
 
           <Card title="Intäkter" className="mb-6">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-              <StatCard label="TOTALT INKÖRT" value={formatSek(overview.grossIncome)} />
-              <StatCard label="EGNA BOKNINGAR" value={formatSek(overview.ownBookings)} />
-              <StatCard label="ÖVRIGA KÖRNINGAR" value={formatSek(overview.otherIncome)} />
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard label="EGNA BOKNINGAR" value={formatIncomeSource(overview.ownBookings)} />
+              <StatCard label="HAND UP" value={formatIncomeSource(overview.handUp)} />
+              <StatCard label="UBER" value={formatIncomeSource(overview.uberIncome)} />
+              <StatCard label="BOLT" value={formatIncomeSource(overview.boltIncome)} />
+              <StatCard label="KÖRINTÄKTER TOTALT" value={formatSek(overview.grossIncome)} />
+              <StatCard label="BONUS" value={formatIncomeSource(overview.bonus)} />
               <StatCard label="DRICKS" value={formatSek(overview.tips)} />
-              <StatCard label="BONUS" value={formatSek(overview.bonus)} />
+              <StatCard label="TOTAL INKOMST" value={formatSek(overview.totalIncome)} />
             </div>
           </Card>
 
@@ -251,11 +257,13 @@ export function TaxiPage() {
 
           <Card title="Månadsavräkning" className="mb-6">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <StatCard label="1. TOTALT INKÖRT" value={formatSek(overview.grossIncome)} />
-              <StatCard label="2. EGNA BOKNINGAR" value={formatSek(overview.ownBookings)} />
-              <StatCard label="3. ÖVRIGA KÖRNINGAR" value={formatSek(overview.otherIncome)} />
-              <StatCard label="4. DRICKS" value={formatSek(overview.tips)} />
-              <StatCard label="5. BONUS" value={formatSek(overview.bonus)} />
+              <StatCard label="1. KÖRINTÄKTER TOTALT" value={formatSek(overview.grossIncome)} />
+              <StatCard label="2. EGNA BOKNINGAR" value={formatIncomeSource(overview.ownBookings)} />
+              <StatCard label="3. HAND UP" value={formatIncomeSource(overview.handUp)} />
+              <StatCard label="4. UBER" value={formatIncomeSource(overview.uberIncome)} />
+              <StatCard label="5. BOLT" value={formatIncomeSource(overview.boltIncome)} />
+              <StatCard label="DRICKS" value={formatSek(overview.tips)} />
+              <StatCard label="BONUS" value={formatIncomeSource(overview.bonus)} />
               <StatCard label="6. ACKUMULERAD BRUTTOLÖN" value={formatSek(overview.accruedSalary)} />
               <StatCard label="7. PRIVAT BRUTTOALLOCERING" value={formatSek(overview.privateGrossAllocation)} />
               <StatCard label="PRELIMINÄRSKATT" value={formatSek(overview.preliminaryTax)} />
@@ -371,11 +379,18 @@ export function TaxiPage() {
 
           <Card title="Statistik">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <StatCard label="INKÖRT BRUTTO" value={formatSek(overview.grossIncome)} />
-              <StatCard label="INKÖRT NETTO" value={formatSek(overview.netIncome)} />
-              <StatCard label="DRICKS" value={formatSek(overview.tips)} />
+              <StatCard label="KÖRINTÄKTER TOTALT" value={formatSek(overview.grossIncome)} />
+              <StatCard label="TOTAL INKOMST" value={formatSek(overview.totalIncome)} />
+              <StatCard label="EJ KATEGORISERADE KÖRINTÄKTER" value={formatIncomeSource(overview.uncategorizedGross)} />
+              <StatCard label="ANDEL EGNA" value={formatSharePercent(overview.sourceShares?.ownBookings)} />
+              <StatCard label="ANDEL HAND UP" value={formatSharePercent(overview.sourceShares?.handUp)} />
+              <StatCard label="ANDEL UBER" value={formatSharePercent(overview.sourceShares?.uberIncome)} />
+              <StatCard label="ANDEL BOLT" value={formatSharePercent(overview.sourceShares?.boltIncome)} />
+              <StatCard label="KR PER TIMME" value={formatIncomeSource(overview.incomePerHour?.driving)} />
+              <StatCard label="BONUS / TIMME" value={formatIncomeSource(overview.incomePerHour?.bonus)} />
+              <StatCard label="DRICKS / TIMME" value={formatIncomeSource(overview.incomePerHour?.tips)} />
               <StatCard label="ARBETAD TID" value={formatHoursValue(overview.workedHours)} />
-              <StatCard label="LADDNING" value={formatKwhValue(overview.chargingKwh)} />
+              <StatCard label="LADDNING (HISTORIK)" value={formatKwhValue(overview.chargingKwh)} />
               <StatCard label="ACKUMULERAD LÖN" value={formatSek(overview.accruedSalary)} hint={overview.salaryStatusLabel} />
             </div>
           </Card>

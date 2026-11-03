@@ -344,13 +344,18 @@ export interface TaxiLogDay {
   grossIncome: string;
   ownBookings: string | null;
   otherIncome: string | null;
+  handUp: string | null;
+  uberIncome: string | null;
+  boltIncome: string | null;
   netIncome: string;
   vatAmount?: string;
   vatRate?: string;
   tips: string;
   bonus: string | null;
+  totalIncome?: string;
   workedHours: string;
   chargingKwh: string;
+  sourceCategorized?: boolean;
 }
 
 export interface TaxiLogSavings {
@@ -381,6 +386,26 @@ export interface TaxiLogMonth {
   grossIncome: string;
   ownBookings: string | null;
   otherIncome: string | null;
+  handUp: string | null;
+  uberIncome: string | null;
+  boltIncome: string | null;
+  totalIncome: string;
+  uncategorizedGross: string | null;
+  sourceShares: {
+    ownBookings: string | null;
+    handUp: string | null;
+    uberIncome: string | null;
+    boltIncome: string | null;
+  };
+  incomePerHour: {
+    driving: string | null;
+    ownBookings: string | null;
+    handUp: string | null;
+    uberIncome: string | null;
+    boltIncome: string | null;
+    bonus: string | null;
+    tips: string | null;
+  };
   vatAmount: string;
   netIncome: string;
   tips: string;
@@ -430,19 +455,28 @@ export interface TaxiLogParseResult {
     grossIncome: string;
     ownBookings: string | null;
     otherIncome: string | null;
+    handUp: string | null;
+    uberIncome: string | null;
+    boltIncome: string | null;
     tips: string;
     bonus: string;
     workedHours: string;
-    chargingKwh: string;
+    chargingKwh?: string;
+    totalIncome: string;
   };
   preview: {
     grossIncome: string;
     ownBookings: string | null;
     otherIncome: string | null;
+    handUp: string | null;
+    uberIncome: string | null;
+    boltIncome: string | null;
     vatAmount: string;
     netIncome: string;
     tips: string;
     bonus: string;
+    totalIncome: string;
+    workedHours: string;
     estimatedSalary: string;
     savingsFromDay: string;
   };

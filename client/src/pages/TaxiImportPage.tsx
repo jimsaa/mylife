@@ -6,20 +6,22 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Textarea } from '../components/ui/Input';
 import { StatCard } from '../components/ui/StatCard';
-import { formatHoursValue, formatKwhValue, formatSek } from '../lib/taxilogDisplay';
+import { formatHoursValue, formatIncomeSource, formatSek } from '../lib/taxilogDisplay';
 import type { TaxiLogParseResult } from '../types';
 
 const PLACEHOLDER = `TAXILOG_IMPORT
-VERSION=2
-DATE=2026-11-02
+VERSION=3
+DATE=2026-11-03
 
-GROSS_INCOME=1500
-OWN_BOOKINGS=800
-OTHER_INCOME=700
-TIPS=100
-BONUS=250
-WORKED_HOURS=8
-CHARGING_KWH=35.5
+OWN_BOOKINGS=0
+HAND_UP=0
+UBER_INCOME=0
+BOLT_INCOME=0
+
+BONUS=0
+TIPS=0
+
+WORKED_HOURS=0
 
 END_TAXILOG_IMPORT`;
 
@@ -60,7 +62,7 @@ export function TaxiImportPage() {
     <div>
       <PageHeader
         title="Taxi-import"
-        subtitle="VERSION=2 med egna bokningar och bonus. VERSION=1 fungerar fortfarande."
+        subtitle="VERSION=3 med sex intäktskällor. VERSION=1 och VERSION=2 fungerar fortfarande."
         action={
           <Link to="/admin/taxi">
             <Button variant="secondary">Tillbaka till översikt</Button>
@@ -91,13 +93,15 @@ export function TaxiImportPage() {
             {parsed.parsed.date} · VERSION={parsed.parsed.version}
           </p>
           <div className="mb-6 grid gap-4 sm:grid-cols-2">
-            <StatCard label="INKÖRT BRUTTO" value={formatSek(parsed.parsed.grossIncome)} />
-            <StatCard label="EGNA BOKNINGAR" value={formatSek(parsed.parsed.ownBookings)} />
-            <StatCard label="ÖVRIGA KÖRNINGAR" value={formatSek(parsed.parsed.otherIncome)} />
-            <StatCard label="DRICKS" value={formatSek(parsed.parsed.tips)} />
+            <StatCard label="EGNA BOKNINGAR" value={formatIncomeSource(parsed.preview.ownBookings)} />
+            <StatCard label="HAND UP" value={formatIncomeSource(parsed.preview.handUp)} />
+            <StatCard label="UBER" value={formatIncomeSource(parsed.preview.uberIncome)} />
+            <StatCard label="BOLT" value={formatIncomeSource(parsed.preview.boltIncome)} />
+            <StatCard label="KÖRINTÄKTER TOTALT" value={formatSek(parsed.preview.grossIncome)} />
             <StatCard label="BONUS" value={formatSek(parsed.preview.bonus)} />
-            <StatCard label="ARBETAD TID" value={formatHoursValue(parsed.parsed.workedHours)} />
-            <StatCard label="LADDNING" value={formatKwhValue(parsed.parsed.chargingKwh)} />
+            <StatCard label="DRICKS" value={formatSek(parsed.preview.tips)} />
+            <StatCard label="TOTAL INKOMST" value={formatSek(parsed.preview.totalIncome)} />
+            <StatCard label="ARBETAD TID" value={formatHoursValue(parsed.preview.workedHours)} />
             <StatCard label="LÖNEGRUNDANDE" value={formatSek(parsed.preview.netIncome)} />
             <StatCard label="UPPSKATTAD LÖN" value={formatSek(parsed.preview.estimatedSalary)} />
             <StatCard label="TILL SPARANDE" value={formatSek(parsed.preview.savingsFromDay)} />

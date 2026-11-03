@@ -61,9 +61,14 @@ router.post('/day', (req, res) => {
       grossIncome: String(req.body.grossIncome ?? ''),
       tips: String(req.body.tips ?? '0'),
       workedHours: String(req.body.workedHours ?? '0'),
-      chargingKwh: String(req.body.chargingKwh ?? '0'),
+      chargingKwh: req.body.chargingKwh === undefined || req.body.chargingKwh === null || req.body.chargingKwh === ''
+        ? undefined
+        : String(req.body.chargingKwh),
       ownBookings: req.body.ownBookings ?? undefined,
       otherIncome: req.body.otherIncome ?? undefined,
+      handUp: req.body.handUp ?? undefined,
+      uberIncome: req.body.uberIncome ?? undefined,
+      boltIncome: req.body.boltIncome ?? undefined,
       bonus: req.body.bonus ?? undefined,
     });
     res.status(201).json({ day: saved, exportText: getTaxiLogExport(saved?.date ?? req.body.date) });

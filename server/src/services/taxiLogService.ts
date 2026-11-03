@@ -28,6 +28,9 @@ type WorkDayRow = {
   total_income: string;
   own_bookings: string | null;
   other_income: string | null;
+  hand_up: string | null;
+  uber_income: string | null;
+  bolt_income: string | null;
   tips: string;
   bonus: string | null;
   vat_rate: string;
@@ -100,6 +103,9 @@ function readState(): TaxiLogState {
         totalIncome: row.total_income,
         ownBookings: row.own_bookings ?? null,
         otherIncome: row.other_income ?? null,
+        handUp: row.hand_up ?? null,
+        uberIncome: row.uber_income ?? null,
+        boltIncome: row.bolt_income ?? null,
         tips: row.tips,
         bonus: row.bonus ?? null,
         vatRate: row.vat_rate,
@@ -183,9 +189,9 @@ function writeState(state: TaxiLogState): void {
 
     const insertDay = db.prepare(`
       INSERT INTO taxi_work_days (
-        date, work_hours, total_income, own_bookings, other_income, tips, bonus,
-        vat_rate, vat_amount, income_ex_vat, total_costs, total_km, number_of_trips, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        date, work_hours, total_income, own_bookings, other_income, hand_up, uber_income, bolt_income,
+        tips, bonus, vat_rate, vat_amount, income_ex_vat, total_costs, total_km, number_of_trips, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `);
     for (const day of state.workDays) {
       insertDay.run(
@@ -194,6 +200,9 @@ function writeState(state: TaxiLogState): void {
         day.totalIncome,
         day.ownBookings,
         day.otherIncome,
+        day.handUp,
+        day.uberIncome,
+        day.boltIncome,
         day.tips,
         day.bonus,
         day.vatRate,

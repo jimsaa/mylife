@@ -24,6 +24,16 @@ export function formatSek(value: string | number | null | undefined): string {
   return fraction === '00' ? `${grouped} kr` : `${grouped},${fraction} kr`;
 }
 
+export function formatIncomeSource(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return 'Ej kategoriserad';
+  return formatSek(value);
+}
+
+export function formatSharePercent(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return 'Ej kategoriserad';
+  return `${value} %`;
+}
+
 export function formatHoursValue(value: string | number): string {
   if (value === '' || value === null || value === undefined) return '0 h';
   return `${value} h`;
