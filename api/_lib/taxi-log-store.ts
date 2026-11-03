@@ -4,7 +4,7 @@
  */
 import { access, mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
-import { list, put } from '@vercel/blob';
+import { get, list, put, type GetBlobResult } from '@vercel/blob';
 import { parseTaxiLogImport } from './taxilog/import/taxilogImport';
 import {
   buildDailyExportFromState,
@@ -22,11 +22,150 @@ import {
   type TaxiLogState,
 } from './taxilog/service';
 
-const BLOB_PATH = 'taxi-log/state.json';
+export const TAXI_LOG_BLOB_PATH = 'taxi-log/state.json';
+export const TAXI_LOG_BLOB_ACCESS = 'private' as const;
+
+export const TAXI_LOG_BLOB_GET_OPTIONS = {
+  access: TAXI_LOG_BLOB_ACCESS,
+  useCache: false as const,
+};
+
+export const TAXI_LOG_BLOB_PUBLIC_FALLBACK_GET_OPTIONS = {
+  access: 'public' as const,
+  useCache: false as const,
+};
+
+export const TAXI_LOG_BLOB_PUT_OPTIONS = {
+  access: TAXI_LOG_BLOB_ACCESS,
+  addRandomSuffix: false,
+  allowOverwrite: true,
+  contentType: 'application/json',
+  cacheControlMaxAge: 60,
+};
+
 const LOCAL_FALLBACK = path.join(process.cwd(), 'data', 'taxi-log-vercel.json');
 
+export type TaxiLogBlobIO = {
+  getPrivate(): Promise<string | null>;
+  getPublic(): Promise<string | null>;
+  put(body: string): Promise<unknown>;
+  listExists(): Promise<boolean>;
+};
+
+export function createMemoryTaxiLogBlobIO(initial?: {
+  privateBody?: string | null;
+  publicBody?: string | null;
+}): TaxiLogBlobIO & {
+  privateReads: number;
+  publicReads: number;
+  listCalls: number;
+  puts: string[];
+  putReturnValue: { url: string; downloadUrl: string };
+  listError: Error | null;
+  privateBody: string | null;
+  publicBody: string | null;
+} {
+  const io = {
+    privateReads: 0,
+    publicReads: 0,
+    listCalls: 0,
+    puts: [] as string[],
+    listError: null as Error | null,
+    privateBody: initial?.privateBody ?? null,
+    publicBody: initial?.publicBody ?? null,
+    putReturnValue: {
+      url: 'https://example.private.blob.vercel-storage.com/taxi-log/state.json',
+      downloadUrl: 'https://example.private.blob.vercel-storage.com/taxi-log/state.json?download=1',
+    },
+    async getPrivate() {
+      io.privateReads += 1;
+      return io.privateBody;
+    },
+    async getPublic() {
+      io.publicReads += 1;
+      return io.publicBody;
+    },
+    async put(body: string) {
+      io.puts.push(body);
+      io.privateBody = body;
+      io.publicBody = null;
+      return io.putReturnValue;
+    },
+    async listExists() {
+      io.listCalls += 1;
+      if (io.listError) throw io.listError;
+      return io.privateBody != null || io.publicBody != null;
+    },
+  };
+  return io;
+}
+
+let testIO: TaxiLogBlobIO | null = null;
+
+export function setTaxiLogBlobIOForTests(io: TaxiLogBlobIO | null): void {
+  testIO = io;
+}
+
 function blobConfigured(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return testIO != null || Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+}
+
+async function streamToText(stream: ReadableStream<Uint8Array>): Promise<string> {
+  return new Response(stream).text();
+}
+
+export async function textFromBlobGetResult(result: GetBlobResult | null): Promise<string | null> {
+  if (result === null) {
+    return null;
+  }
+  if (result.statusCode === 200 && result.stream) {
+    return streamToText(result.stream);
+  }
+  if (result.statusCode === 304) {
+    throw new Error('TaxiLog blob GET returned 304 Not Modified.');
+  }
+  throw new Error('TaxiLog blob GET returned an unusable response.');
+}
+
+function parseState(raw: string | null): TaxiLogState {
+  if (raw == null || raw.trim() === '') return emptyTaxiLogState();
+  try {
+    const parsed = JSON.parse(raw) as TaxiLogState;
+    if (!parsed || !Array.isArray(parsed.workDays)) return emptyTaxiLogState();
+    return parsed;
+  } catch {
+    return emptyTaxiLogState();
+  }
+}
+
+async function readSdkBlobText(access: 'private' | 'public'): Promise<string | null> {
+  const result = await get(
+    TAXI_LOG_BLOB_PATH,
+    access === 'private' ? TAXI_LOG_BLOB_GET_OPTIONS : TAXI_LOG_BLOB_PUBLIC_FALLBACK_GET_OPTIONS,
+  );
+  return textFromBlobGetResult(result);
+}
+
+function createDefaultBlobIO(): TaxiLogBlobIO {
+  return {
+    async getPrivate() {
+      return readSdkBlobText('private');
+    },
+    async getPublic() {
+      return readSdkBlobText('public');
+    },
+    async put(body: string) {
+      await put(TAXI_LOG_BLOB_PATH, body, TAXI_LOG_BLOB_PUT_OPTIONS);
+    },
+    async listExists() {
+      const { blobs } = await list({ prefix: TAXI_LOG_BLOB_PATH, limit: 1 });
+      return blobs.some((item) => item.pathname === TAXI_LOG_BLOB_PATH);
+    },
+  };
+}
+
+function resolveBlobIO(): TaxiLogBlobIO {
+  return testIO ?? createDefaultBlobIO();
 }
 
 async function readLocal(): Promise<TaxiLogState> {
@@ -46,23 +185,16 @@ async function writeLocal(state: TaxiLogState): Promise<void> {
 }
 
 async function readBlob(): Promise<TaxiLogState> {
-  const { blobs } = await list({ prefix: BLOB_PATH, limit: 1 });
-  const hit = blobs.find((item) => item.pathname === BLOB_PATH) ?? blobs[0];
-  if (!hit?.url) return emptyTaxiLogState();
-  const res = await fetch(hit.url);
-  if (!res.ok) return emptyTaxiLogState();
-  const parsed = (await res.json()) as TaxiLogState;
-  if (!parsed || !Array.isArray(parsed.workDays)) return emptyTaxiLogState();
-  return parsed;
+  const io = resolveBlobIO();
+  const privateText = await io.getPrivate();
+  if (privateText != null) return parseState(privateText);
+  const publicText = await io.getPublic();
+  if (publicText != null) return parseState(publicText);
+  return emptyTaxiLogState();
 }
 
 async function writeBlob(state: TaxiLogState): Promise<void> {
-  await put(BLOB_PATH, JSON.stringify(state), {
-    access: 'public',
-    addRandomSuffix: false,
-    contentType: 'application/json',
-    allowOverwrite: true,
-  });
+  await resolveBlobIO().put(JSON.stringify(state));
 }
 
 async function loadState(): Promise<TaxiLogState> {
@@ -83,6 +215,23 @@ async function saveState(state: TaxiLogState): Promise<void> {
   await writeLocal(state);
 }
 
+async function hasPersisted(): Promise<boolean> {
+  if (blobConfigured()) {
+    try {
+      return await resolveBlobIO().listExists();
+    } catch {
+      // Fail closed: a list error must not look like an empty store (that would seed/overwrite).
+      return true;
+    }
+  }
+  try {
+    await access(LOCAL_FALLBACK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function getMonth(year: number, month: number) {
   const state = await loadState();
   try {
@@ -93,19 +242,6 @@ export async function getMonth(year: number, month: number) {
     // Keep the overview readable if Blob is not configured yet.
   }
   return loadMonthOverviewFromState(state, year, month);
-}
-
-async function hasPersisted(): Promise<boolean> {
-  if (blobConfigured()) {
-    const { blobs } = await list({ prefix: BLOB_PATH, limit: 1 });
-    return blobs.length > 0;
-  }
-  try {
-    await access(LOCAL_FALLBACK);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export async function getDay(date: string) {
