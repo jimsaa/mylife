@@ -146,6 +146,52 @@ export function TaxiPage() {
             <StatCard label="SPARANDE" value={formatSek(overview.savings.total)} />
           </div>
 
+          <Card title={`LÖNEMÅL — ${formatMonthHeadingSv(overview.year, overview.month)}`} className="mb-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <StatCard label="INKÖRT BRUTTO (LÖNEGRUNDANDE)" value={formatSek(overview.grossIncome)} />
+              <StatCard label="ACKUMULERAD BRUTTOLÖN" value={formatSek(overview.accruedSalary)} />
+              <StatCard label="LÖNETRÖSKEL" value={formatSek(overview.privateGrossTarget)} />
+              <StatCard label="KVAR TILL TRÖSKEL" value={formatSek(overview.remainingToThreshold)} />
+              <StatCard label="YTTERLIGARE INKÖRT BEHÖVS" value={formatSek(overview.additionalGrossIncomeRequired)} />
+              <StatCard label="FÖRVÄNTAD UTBETALNING" value={formatDateTitleSv(overview.expectedPaymentDate)} />
+            </div>
+            <div className="mt-4">
+              <div className="mb-2 flex justify-between text-sm text-text-muted">
+                <span>Mot 15 500 kr brutto</span>
+                <span>{overview.salaryProgressPercent} %</span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-surface-muted">
+                <div
+                  className="h-full bg-accent"
+                  style={{ width: `${Math.min(100, Number(overview.salaryProgressPercent) || 0)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-sm text-text-muted">Dricks och bonus räknas inte in i löneprogressen.</p>
+            </div>
+          </Card>
+
+          {overview.nextPayment ? (
+            <Card title="NÄSTA LÖNEUTBETALNING" className="mb-6">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <StatCard
+                  label="INTJÄNANDEPERIOD"
+                  value={`${formatMonthHeadingSv(overview.nextPayment.earningYear, overview.nextPayment.earningMonth)}`}
+                />
+                <StatCard label="UTBETALNINGSDATUM" value={formatDateTitleSv(overview.nextPayment.paymentDate)} />
+                <StatCard label="ACKUMULERAD BRUTTOLÖN" value={formatSek(overview.nextPayment.accruedSalary)} />
+                <StatCard label="PRIVAT BRUTTOALLOCERING" value={formatSek(overview.nextPayment.privateGrossAllocation)} />
+                <StatCard label="PRELIMINÄRSKATT" value={formatSek(overview.nextPayment.preliminaryTax)} />
+                <StatCard label="FÖRVÄNTAD NETTOUTBETALNING" value={formatSek(overview.nextPayment.expectedNetPayout)} />
+                <StatCard label="LÖNEÖVERSKOTT TILL SPARANDE" value={formatSek(overview.nextPayment.salarySurplus)} />
+              </div>
+              <p className="mt-4 text-sm text-text-muted">
+                {overview.nextPayment.settlementLocked
+                  ? 'Föregående månad är avräknad. Beloppen kommer från den låsta perioden, inte innevarande månads live-intäkter.'
+                  : 'Föregående månad är inte avräknad ännu. Den markeras inte som utbetald förrän avräkningen bekräftas.'}
+              </p>
+            </Card>
+          ) : null}
+
           <Card className="mb-6">
             <TaxiIncomeChart
               year={overview.year}
@@ -188,13 +234,14 @@ export function TaxiPage() {
 
           <Card title="Lön" className="mb-6">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <StatCard label="BERÄKNAD LÖNEGRUND" value={formatSek(overview.netIncome)} />
-              <StatCard label="BERÄKNAD LÖN" value={formatSek(overview.accruedSalary)} hint={overview.salaryStatusLabel} />
-              <StatCard label="PRIVAT NETTOUTTAG" value={formatSek(overview.privateNetTarget)} />
-              <StatCard label="PLANERAT UTTAG" value={formatSek(overview.projectedPrivateNet)} />
-              <StatCard label="FAKTISKT UTTAG" value={formatSek(overview.privateNetTaken)} />
+              <StatCard label="ACKUMULERAD BRUTTOLÖN" value={formatSek(overview.accruedSalary)} hint={overview.salaryStatusLabel} />
+              <StatCard label="PRIVAT BRUTTOALLOCERING" value={formatSek(overview.privateGrossAllocation)} />
+              <StatCard label="PRELIMINÄRSKATT" value={formatSek(overview.preliminaryTax)} />
+              <StatCard label="TILLGÄNGLIG NETTOLÖN" value={formatSek(overview.projectedPrivateNet)} />
+              <StatCard label="NETTOMÅL" value={formatSek(overview.privateNetTarget)} />
+              <StatCard label="FAKTISK NETTOUTBETALNING" value={formatSek(overview.privateNetTaken)} />
               <StatCard
-                label={Number(overview.projectedShortfall) > 0 ? 'SAKNAS TILL 13 000' : 'ÖVERSKOTT TILL SPARANDE'}
+                label={Number(overview.projectedShortfall) > 0 ? 'KVAR TILL 15 500 BRUTTO' : 'BRUTTOÖVERSKOTT TILL SPARANDE'}
                 value={formatSek(
                   Number(overview.projectedShortfall) > 0 ? overview.projectedShortfall : overview.projectedSurplus,
                 )}
@@ -209,17 +256,20 @@ export function TaxiPage() {
               <StatCard label="3. ÖVRIGA KÖRNINGAR" value={formatSek(overview.otherIncome)} />
               <StatCard label="4. DRICKS" value={formatSek(overview.tips)} />
               <StatCard label="5. BONUS" value={formatSek(overview.bonus)} />
-              <StatCard label="6. BERÄKNAD LÖN" value={formatSek(overview.accruedSalary)} />
-              <StatCard label="7. PRIVAT NETTOUTTAG" value={formatSek(overview.privateNetTaken)} />
-              <StatCard label="8. LÖNEÖVERSKOTT" value={formatSek(overview.savings.monthSalarySurplus)} />
+              <StatCard label="6. ACKUMULERAD BRUTTOLÖN" value={formatSek(overview.accruedSalary)} />
+              <StatCard label="7. PRIVAT BRUTTOALLOCERING" value={formatSek(overview.privateGrossAllocation)} />
+              <StatCard label="PRELIMINÄRSKATT" value={formatSek(overview.preliminaryTax)} />
+              <StatCard label="NETTOMÅL" value={formatSek(overview.privateNetTarget)} />
+              <StatCard label="FAKTISK NETTOUTBETALNING" value={formatSek(overview.privateNetTaken)} />
+              <StatCard label="8. LÖNEÖVERSKOTT (BRUTTO)" value={formatSek(overview.savings.monthSalarySurplus)} />
               <StatCard label="9. DRICKS + BONUS" value={formatSek(Number(overview.savings.monthTips) + Number(overview.savings.monthBonus))} />
               <StatCard label="10. MÅNADENS SPARANDE" value={formatSek(overview.savings.monthTotal)} />
               <StatCard label="11. ACKUMULERAT SPARSALDO" value={formatSek(overview.savings.total)} />
             </div>
             <p className="mt-4 text-sm text-text-muted">
               {overview.settlementLocked
-                ? `Månaden är låst${overview.settlementLockedAt ? ` ${overview.settlementLockedAt}` : ''}. 13 000 kr tas inte ut förrän avräkningen bekräftas.`
-                : '13 000 kr tas inte ut förrän månadsavräkningen bekräftas. Överskott och privat uttag bokförs då.'}
+                ? `Månaden är låst${overview.settlementLockedAt ? ` ${overview.settlementLockedAt}` : ''}. 15 500 kr brutto (13 181 kr netto) tas inte ut förrän avräkningen bekräftas.`
+                : '15 500 kr brutto (13 181 kr netto efter tabell 33 kolumn 1) tas inte ut förrän månadsavräkningen bekräftas. Bruttoöverskott går till sparande utan extra skatt.'}
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
               <Button

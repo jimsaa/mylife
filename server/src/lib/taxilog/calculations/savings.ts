@@ -2,7 +2,12 @@ import Decimal from "decimal.js";
 import { CalculationError } from "./errors";
 import { assertNonNegative, toDecimal, toMoney, type DecimalInput } from "./money";
 import { pad2, parseIsoDate, yearMonthFromDate } from "./period";
-import { DEFAULT_PRIVATE_NET_WITHDRAWAL } from "../settings/defaults";
+import { DEFAULT_SALARY_RATE, DEFAULT_VAT_RATE } from "../settings/defaults";
+import {
+  PRIVATE_GROSS_THRESHOLD,
+  PRIVATE_NET_PAYOUT,
+  PRIVATE_THRESHOLD_TAX,
+} from "./taxTable33_2026";
 
 export const SAVINGS_KINDS = [
   "TIPS",
@@ -41,22 +46,54 @@ export function privateNetPaymentNotes(year: number, month: number): string {
   return `PRIVATE_NET:${year}-${pad2(month)}`;
 }
 
-export function projectSalarySplit(
-  accruedSalary: DecimalInput,
-  privateNetTarget: DecimalInput = DEFAULT_PRIVATE_NET_WITHDRAWAL,
-) {
+export function privateGrossPaymentNotes(year: number, month: number): string {
+  return `PRIVATE_GROSS:${year}-${pad2(month)}`;
+}
+
+export function surplusAllocationNotes(year: number, month: number): string {
+  return `SALARY_SURPLUS_ALLOC:${year}-${pad2(month)}`;
+}
+
+export function projectSalarySplit(accruedSalary: DecimalInput) {
   const accrued = toMoney(assertNonNegative(accruedSalary, "Beräknad lön kan inte vara negativ."));
-  const target = toMoney(assertNonNegative(privateNetTarget, "Privat uttag kan inte vara negativt."));
-  const surplus = Decimal.max(accrued.minus(target), 0);
-  const shortfall = Decimal.max(target.minus(accrued), 0);
-  const privateNet = Decimal.min(accrued, target);
+  const grossTarget = toMoney(PRIVATE_GROSS_THRESHOLD);
+  const netTarget = toMoney(PRIVATE_NET_PAYOUT);
+  const reachedThreshold = accrued.greaterThanOrEqualTo(grossTarget);
+  const privateGross = reachedThreshold ? grossTarget : accrued;
+  const privateTax = reachedThreshold ? toMoney(PRIVATE_THRESHOLD_TAX) : toMoney(0);
+  const privateNet = reachedThreshold ? netTarget : toMoney(0);
+  const surplus = Decimal.max(accrued.minus(grossTarget), 0);
+  const shortfallNet = reachedThreshold ? toMoney(0) : toMoney(grossTarget.minus(accrued));
 
   return {
     accruedSalary: accrued,
-    privateNetTarget: target,
-    projectedPrivateNet: toMoney(privateNet),
+    privateGrossTarget: grossTarget,
+    privateGrossAllocation: toMoney(privateGross),
+    preliminaryTax: toMoney(privateTax),
+    privateNetTarget: netTarget,
+    projectedPrivateNet: privateNet,
     projectedSurplus: toMoney(surplus),
-    projectedShortfall: toMoney(shortfall),
+    projectedShortfall: toMoney(shortfallNet),
+  };
+}
+
+export function salaryThresholdProgress(accruedSalary: DecimalInput) {
+  const accrued = toMoney(assertNonNegative(accruedSalary, "Beräknad lön kan inte vara negativ."));
+  const target = toMoney(PRIVATE_GROSS_THRESHOLD);
+  const remaining = Decimal.max(target.minus(accrued), 0);
+  const vatFactor = new Decimal(100).minus(DEFAULT_VAT_RATE).dividedBy(100);
+  const salaryFactor = toDecimal(DEFAULT_SALARY_RATE).dividedBy(100);
+  const additionalGross = remaining.isZero()
+    ? toMoney(0)
+    : toMoney(remaining.dividedBy(salaryFactor).dividedBy(vatFactor));
+  const progressPercent = accrued.greaterThanOrEqualTo(target)
+    ? "100.0"
+    : accrued.dividedBy(target).times(100).toFixed(1);
+
+  return {
+    remainingToThreshold: toMoney(remaining),
+    additionalGrossIncomeRequired: additionalGross,
+    progressPercent,
   };
 }
 

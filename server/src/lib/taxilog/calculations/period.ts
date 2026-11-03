@@ -71,6 +71,19 @@ export function previousYearMonth(year: number, month: number): YearMonth {
   return { year, month: month - 1 };
 }
 
+export function nextYearMonth(year: number, month: number): YearMonth {
+  if (month === 12) {
+    return { year: year + 1, month: 1 };
+  }
+  return { year, month: month + 1 };
+}
+
+/** Salary earned in a calendar month is paid on the 25th of the following month. */
+export function salaryPaymentDate(earningYear: number, earningMonth: number): string {
+  const paid = nextYearMonth(earningYear, earningMonth);
+  return toIsoDate(paid.year, paid.month, 25);
+}
+
 export function isSameYearMonth(left: YearMonth, right: YearMonth): boolean {
   return left.year === right.year && left.month === right.month;
 }

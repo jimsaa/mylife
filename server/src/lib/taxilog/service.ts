@@ -8,15 +8,24 @@ import {
   type SalaryPaymentRecord,
   type WorkDayPayrollSource,
 } from "./calculations/payroll";
-import { monthPeriod, parseIsoDate, yearMonthFromDate } from "./calculations/period";
+import {
+  monthPeriod,
+  parseIsoDate,
+  previousYearMonth,
+  salaryPaymentDate,
+  yearMonthFromDate,
+} from "./calculations/period";
 import { CalculationError } from "./calculations/errors";
 import { toMoney } from "./calculations/money";
 import {
   bonusSourceKey,
   migrateHistoricalTips,
+  privateGrossPaymentNotes,
   privateNetPaymentNotes,
   projectSalarySplit,
+  salaryThresholdProgress,
   summarizeSavings,
+  surplusAllocationNotes,
   surplusSourceKey,
   tipsSourceKey,
   upsertSavingsEntry,
@@ -333,7 +342,12 @@ export function loadDailyLogFromState(state: TaxiLogState, date: string) {
   };
 }
 
-export function loadMonthOverviewFromState(state: TaxiLogState, year: number, month: number) {
+export function loadMonthOverviewFromState(
+  state: TaxiLogState,
+  year: number,
+  month: number,
+  options: { includeNextPayment?: boolean } = {},
+) {
   const normalized = normalizeTaxiLogState(state);
   const period = monthPeriod(year, month);
   const workDays = normalized.workDays.filter(
@@ -372,12 +386,44 @@ export function loadMonthOverviewFromState(state: TaxiLogState, year: number, mo
   const own = sumKnown(workDays.map((day) => day.ownBookings));
   const other = sumKnown(workDays.map((day) => day.otherIncome));
   const bonus = sumKnown(workDays.map((day) => day.bonus));
-  const split = projectSalarySplit(payroll.accruedSalary, normalized.privateNetTarget);
+  const liveSplit = projectSalarySplit(payroll.accruedSalary);
   const existing = normalized.payrolls.find((row) => row.year === year && row.month === month);
   const savings = summarizeSavings(normalized.savingsLedger, year, month);
-  const privateNetTaken = normalized.payments
-    .filter((payment) => payment.year === year && payment.month === month && payment.notes === privateNetPaymentNotes(year, month))
+  const privateGrossNotes = privateGrossPaymentNotes(year, month);
+  const privateNetNotes = privateNetPaymentNotes(year, month);
+  const privateGrossTaken = normalized.payments
+    .filter((payment) => payment.year === year && payment.month === month && payment.notes === privateGrossNotes)
     .reduce((sum, payment) => sum.plus(payment.amount), new Decimal(0));
+  const privateNetLegacyTaken = normalized.payments
+    .filter((payment) => payment.year === year && payment.month === month && payment.notes === privateNetNotes)
+    .reduce((sum, payment) => sum.plus(payment.amount), new Decimal(0));
+  const lockedSurplus = toMoney(
+    normalized.savingsLedger
+      .filter((entry) => entry.kind === "SALARY_SURPLUS" && entry.year === year && entry.month === month)
+      .reduce((sum, entry) => sum.plus(entry.amount), new Decimal(0)),
+  );
+  const split =
+    existing?.settlementLocked && privateGrossTaken.eq(0) && privateNetLegacyTaken.greaterThan(0)
+      ? {
+          ...liveSplit,
+          privateGrossAllocation: toMoney(privateNetLegacyTaken),
+          preliminaryTax: toMoney(0),
+          projectedPrivateNet: toMoney(privateNetLegacyTaken),
+          projectedSurplus: lockedSurplus,
+          projectedShortfall: toMoney(0),
+        }
+      : liveSplit;
+  const privateNetTaken = existing?.settlementLocked
+    ? privateGrossTaken.greaterThan(0)
+      ? split.projectedPrivateNet
+      : toMoney(privateNetLegacyTaken)
+    : toMoney(0);
+  const progress = salaryThresholdProgress(payroll.accruedSalary);
+  const includeNextPayment = options.includeNextPayment !== false;
+  const previous = previousYearMonth(year, month);
+  const previousOverview = includeNextPayment
+    ? loadMonthOverviewFromState(normalized, previous.year, previous.month, { includeNextPayment: false })
+    : null;
 
   return {
     year,
@@ -399,10 +445,32 @@ export function loadMonthOverviewFromState(state: TaxiLogState, year: number, mo
     salaryStatus: payroll.salaryStatus,
     salaryStatusLabel: getSalaryStatusLabelSv(payroll.salaryStatus),
     privateNetTarget: split.privateNetTarget.toFixed(2),
+    privateGrossTarget: split.privateGrossTarget.toFixed(2),
+    privateGrossAllocation: split.privateGrossAllocation.toFixed(2),
+    preliminaryTax: split.preliminaryTax.toFixed(2),
     projectedPrivateNet: split.projectedPrivateNet.toFixed(2),
     projectedSurplus: split.projectedSurplus.toFixed(2),
     projectedShortfall: split.projectedShortfall.toFixed(2),
     privateNetTaken: toMoney(privateNetTaken).toFixed(2),
+    expectedPaymentDate: salaryPaymentDate(year, month),
+    remainingToThreshold: progress.remainingToThreshold.toFixed(2),
+    additionalGrossIncomeRequired: progress.additionalGrossIncomeRequired.toFixed(2),
+    salaryProgressPercent: progress.progressPercent,
+    nextPayment: previousOverview
+      ? {
+          earningYear: previousOverview.year,
+          earningMonth: previousOverview.month,
+          periodStart: previousOverview.periodStart,
+          periodEnd: previousOverview.periodEnd,
+          paymentDate: salaryPaymentDate(previousOverview.year, previousOverview.month),
+          accruedSalary: previousOverview.accruedSalary,
+          privateGrossAllocation: previousOverview.privateGrossAllocation,
+          preliminaryTax: previousOverview.preliminaryTax,
+          expectedNetPayout: previousOverview.projectedPrivateNet,
+          salarySurplus: previousOverview.projectedSurplus,
+          settlementLocked: previousOverview.settlementLocked,
+        }
+      : null,
     settlementLocked: existing?.settlementLocked ?? false,
     settlementLockedAt: existing?.settlementLockedAt ?? null,
     savings,
@@ -502,13 +570,31 @@ export function settleMonthInState(state: TaxiLogState, year: number, month: num
   const overview = loadMonthOverviewFromState(normalized, year, month);
   let next = normalized;
 
-  const notes = privateNetPaymentNotes(year, month);
-  const alreadyPaid = next.payments.some((payment) => payment.year === year && payment.month === month && payment.notes === notes);
-  if (!alreadyPaid && toMoney(overview.projectedPrivateNet).greaterThan(0)) {
+  const grossNotes = privateGrossPaymentNotes(year, month);
+  const alreadyPaid = next.payments.some(
+    (payment) =>
+      payment.year === year &&
+      payment.month === month &&
+      (payment.notes === grossNotes || payment.notes === privateNetPaymentNotes(year, month)),
+  );
+  const paymentDate = salaryPaymentDate(year, month);
+  if (!alreadyPaid && toMoney(overview.privateGrossAllocation).greaterThan(0)) {
     next = recordSalaryPaymentInState(next, year, month, {
-      paymentDate: asOfDate,
-      amount: overview.projectedPrivateNet,
-      notes,
+      paymentDate,
+      amount: overview.privateGrossAllocation,
+      notes: grossNotes,
+    });
+  }
+
+  const surplusNotes = surplusAllocationNotes(year, month);
+  const surplusAlreadyAllocated = next.payments.some(
+    (payment) => payment.year === year && payment.month === month && payment.notes === surplusNotes,
+  );
+  if (!surplusAlreadyAllocated && toMoney(overview.projectedSurplus).greaterThan(0)) {
+    next = recordSalaryPaymentInState(next, year, month, {
+      paymentDate,
+      amount: overview.projectedSurplus,
+      notes: surplusNotes,
     });
   }
 
@@ -536,14 +622,25 @@ export function settleMonthInState(state: TaxiLogState, year: number, month: num
 
 export function unlockMonthInState(state: TaxiLogState, year: number, month: number) {
   const normalized = normalizeTaxiLogState(state);
-  return {
+  const settlementNotes = new Set([
+    privateGrossPaymentNotes(year, month),
+    privateNetPaymentNotes(year, month),
+    surplusAllocationNotes(year, month),
+  ]);
+  const surplusKey = surplusSourceKey(year, month);
+  const unlocked: TaxiLogState = {
     ...normalized,
+    payments: normalized.payments.filter(
+      (payment) => !(payment.year === year && payment.month === month && payment.notes !== null && settlementNotes.has(payment.notes)),
+    ),
+    savingsLedger: normalized.savingsLedger.filter((entry) => entry.sourceKey !== surplusKey),
     payrolls: normalized.payrolls.map((payroll) =>
       payroll.year === year && payroll.month === month
         ? { ...payroll, settlementLocked: false, settlementLockedAt: null }
         : payroll,
     ),
   };
+  return syncPayrollInState(unlocked, year, month, todayIsoDate());
 }
 
 export function recordManualSavingsInState(

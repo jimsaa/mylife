@@ -1,0 +1,170 @@
+import { CalculationError } from "./errors";
+import { assertNonNegative, toMoney, type DecimalInput } from "./money";
+
+/** Official Skatteverket monthly tax table 33, column 1, income year 2026.
+ * Source: https://www.skatteverket.se/download/18.1522bf3f19aea8075ba61c/1765290465443/allmanna-tabeller-manad-tabell-33.pdf
+ * Only intervals up to the 15,500 SEK private gross threshold are stored.
+ */
+export const TAX_YEAR = 2026;
+export const TAX_TABLE_NUMBER = 33;
+export const TAX_TABLE_COLUMN = 1;
+
+export const PRIVATE_GROSS_THRESHOLD = "15500";
+export const PRIVATE_THRESHOLD_TAX = "2319";
+export const PRIVATE_NET_PAYOUT = "13181";
+
+export const TAX_TABLE_33_2026_COL1: Array<{ from: number; to: number; tax: number }> = [
+  { from: 1, to: 2000, tax: 0 },
+  { from: 2001, to: 2100, tax: 150 },
+  { from: 2101, to: 2200, tax: 152 },
+  { from: 2201, to: 2300, tax: 162 },
+  { from: 2301, to: 2400, tax: 173 },
+  { from: 2401, to: 2500, tax: 183 },
+  { from: 2501, to: 2600, tax: 194 },
+  { from: 2601, to: 2700, tax: 204 },
+  { from: 2701, to: 2800, tax: 215 },
+  { from: 2801, to: 2900, tax: 217 },
+  { from: 2901, to: 3000, tax: 227 },
+  { from: 3001, to: 3100, tax: 238 },
+  { from: 3101, to: 3200, tax: 248 },
+  { from: 3201, to: 3300, tax: 259 },
+  { from: 3301, to: 3400, tax: 269 },
+  { from: 3401, to: 3500, tax: 272 },
+  { from: 3501, to: 3600, tax: 282 },
+  { from: 3601, to: 3700, tax: 293 },
+  { from: 3701, to: 3800, tax: 303 },
+  { from: 3801, to: 3900, tax: 314 },
+  { from: 3901, to: 4000, tax: 324 },
+  { from: 4001, to: 4100, tax: 326 },
+  { from: 4101, to: 4200, tax: 337 },
+  { from: 4201, to: 4300, tax: 347 },
+  { from: 4301, to: 4400, tax: 358 },
+  { from: 4401, to: 4500, tax: 368 },
+  { from: 4501, to: 4600, tax: 379 },
+  { from: 4601, to: 4700, tax: 381 },
+  { from: 4701, to: 4800, tax: 391 },
+  { from: 4801, to: 4900, tax: 402 },
+  { from: 4901, to: 5000, tax: 412 },
+  { from: 5001, to: 5100, tax: 422 },
+  { from: 5101, to: 5200, tax: 432 },
+  { from: 5201, to: 5300, tax: 442 },
+  { from: 5301, to: 5400, tax: 444 },
+  { from: 5401, to: 5500, tax: 454 },
+  { from: 5501, to: 5600, tax: 464 },
+  { from: 5601, to: 5700, tax: 474 },
+  { from: 5701, to: 5800, tax: 484 },
+  { from: 5801, to: 5900, tax: 494 },
+  { from: 5901, to: 6000, tax: 496 },
+  { from: 6001, to: 6100, tax: 506 },
+  { from: 6101, to: 6200, tax: 516 },
+  { from: 6201, to: 6300, tax: 526 },
+  { from: 6301, to: 6400, tax: 536 },
+  { from: 6401, to: 6500, tax: 546 },
+  { from: 6501, to: 6600, tax: 548 },
+  { from: 6601, to: 6700, tax: 558 },
+  { from: 6701, to: 6800, tax: 568 },
+  { from: 6801, to: 6900, tax: 578 },
+  { from: 6901, to: 7000, tax: 588 },
+  { from: 7001, to: 7100, tax: 598 },
+  { from: 7101, to: 7200, tax: 619 },
+  { from: 7201, to: 7300, tax: 639 },
+  { from: 7301, to: 7400, tax: 660 },
+  { from: 7401, to: 7500, tax: 681 },
+  { from: 7501, to: 7600, tax: 701 },
+  { from: 7601, to: 7700, tax: 722 },
+  { from: 7701, to: 7800, tax: 743 },
+  { from: 7801, to: 7900, tax: 763 },
+  { from: 7901, to: 8000, tax: 784 },
+  { from: 8001, to: 8100, tax: 804 },
+  { from: 8101, to: 8200, tax: 825 },
+  { from: 8201, to: 8300, tax: 846 },
+  { from: 8301, to: 8400, tax: 866 },
+  { from: 8401, to: 8500, tax: 887 },
+  { from: 8501, to: 8600, tax: 908 },
+  { from: 8601, to: 8700, tax: 928 },
+  { from: 8701, to: 8800, tax: 949 },
+  { from: 8801, to: 8900, tax: 970 },
+  { from: 8901, to: 9000, tax: 990 },
+  { from: 9001, to: 9100, tax: 1011 },
+  { from: 9101, to: 9200, tax: 1032 },
+  { from: 9201, to: 9300, tax: 1052 },
+  { from: 9301, to: 9400, tax: 1073 },
+  { from: 9401, to: 9500, tax: 1093 },
+  { from: 9501, to: 9600, tax: 1114 },
+  { from: 9601, to: 9700, tax: 1135 },
+  { from: 9701, to: 9800, tax: 1155 },
+  { from: 9801, to: 9900, tax: 1176 },
+  { from: 9901, to: 10000, tax: 1196 },
+  { from: 10001, to: 10100, tax: 1217 },
+  { from: 10101, to: 10200, tax: 1238 },
+  { from: 10201, to: 10300, tax: 1258 },
+  { from: 10301, to: 10400, tax: 1279 },
+  { from: 10401, to: 10500, tax: 1300 },
+  { from: 10501, to: 10600, tax: 1320 },
+  { from: 10601, to: 10700, tax: 1341 },
+  { from: 10701, to: 10800, tax: 1362 },
+  { from: 10801, to: 10900, tax: 1382 },
+  { from: 10901, to: 11000, tax: 1403 },
+  { from: 11001, to: 11100, tax: 1423 },
+  { from: 11101, to: 11200, tax: 1444 },
+  { from: 11201, to: 11300, tax: 1465 },
+  { from: 11301, to: 11400, tax: 1485 },
+  { from: 11401, to: 11500, tax: 1506 },
+  { from: 11501, to: 11600, tax: 1527 },
+  { from: 11601, to: 11700, tax: 1547 },
+  { from: 11701, to: 11800, tax: 1568 },
+  { from: 11801, to: 11900, tax: 1589 },
+  { from: 11901, to: 12000, tax: 1609 },
+  { from: 12001, to: 12100, tax: 1630 },
+  { from: 12101, to: 12200, tax: 1650 },
+  { from: 12201, to: 12300, tax: 1671 },
+  { from: 12301, to: 12400, tax: 1692 },
+  { from: 12401, to: 12500, tax: 1712 },
+  { from: 12501, to: 12600, tax: 1733 },
+  { from: 12601, to: 12700, tax: 1754 },
+  { from: 12701, to: 12800, tax: 1774 },
+  { from: 12801, to: 12900, tax: 1795 },
+  { from: 12901, to: 13000, tax: 1815 },
+  { from: 13001, to: 13100, tax: 1836 },
+  { from: 13101, to: 13200, tax: 1857 },
+  { from: 13201, to: 13300, tax: 1877 },
+  { from: 13301, to: 13400, tax: 1898 },
+  { from: 13401, to: 13500, tax: 1919 },
+  { from: 13501, to: 13600, tax: 1940 },
+  { from: 13601, to: 13700, tax: 1960 },
+  { from: 13701, to: 13800, tax: 1980 },
+  { from: 13801, to: 13900, tax: 2000 },
+  { from: 13901, to: 14000, tax: 2020 },
+  { from: 14001, to: 14100, tax: 2040 },
+  { from: 14101, to: 14200, tax: 2060 },
+  { from: 14201, to: 14300, tax: 2080 },
+  { from: 14301, to: 14400, tax: 2100 },
+  { from: 14401, to: 14500, tax: 2120 },
+  { from: 14501, to: 14600, tax: 2140 },
+  { from: 14601, to: 14700, tax: 2159 },
+  { from: 14701, to: 14800, tax: 2179 },
+  { from: 14801, to: 14900, tax: 2199 },
+  { from: 14901, to: 15000, tax: 2219 },
+  { from: 15001, to: 15100, tax: 2239 },
+  { from: 15101, to: 15200, tax: 2259 },
+  { from: 15201, to: 15300, tax: 2279 },
+  { from: 15301, to: 15400, tax: 2299 },
+  { from: 15401, to: 15500, tax: 2319 }
+];
+
+export function lookupTable33Column1Tax(grossSalary: DecimalInput) {
+  const amount = toMoney(assertNonNegative(grossSalary, "Bruttolön kan inte vara negativ."));
+  if (amount.isZero()) {
+    return toMoney(0);
+  }
+
+  const kroner = Number(amount.toFixed(2));
+  const row = TAX_TABLE_33_2026_COL1.find((entry) => kroner >= entry.from && kroner <= entry.to);
+  if (!row) {
+    throw new CalculationError(
+      "MISSING_TAX_BRACKET",
+      `Skattetabell ${TAX_TABLE_NUMBER} kolumn ${TAX_TABLE_COLUMN} saknar intervall för ${amount.toFixed(2)} kr.`,
+    );
+  }
+  return toMoney(row.tax);
+}
