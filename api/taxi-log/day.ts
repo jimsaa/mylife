@@ -17,6 +17,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tips?: string;
         workedHours?: string;
         chargingKwh?: string;
+        ownBookings?: string | null;
+        otherIncome?: string | null;
+        bonus?: string | null;
       }>(req);
       res.status(201).json(
         await saveDay({
@@ -25,6 +28,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           tips: String(body.tips ?? '0'),
           workedHours: String(body.workedHours ?? '0'),
           chargingKwh: String(body.chargingKwh ?? '0'),
+          ownBookings: body.ownBookings,
+          otherIncome: body.otherIncome,
+          bonus: body.bonus,
         }),
       );
       return;

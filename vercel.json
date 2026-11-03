@@ -13,6 +13,18 @@
   },
   "rewrites": [
     {
+      "source": "/api/taxi-log/settle",
+      "destination": "/api/taxi-log/month"
+    },
+    {
+      "source": "/api/taxi-log/unlock",
+      "destination": "/api/taxi-log/month?action=unlock"
+    },
+    {
+      "source": "/api/taxi-log/savings",
+      "destination": "/api/taxi-log/payment?action=savings"
+    },
+    {
       "source": "/admin",
       "destination": "/index.html"
     },

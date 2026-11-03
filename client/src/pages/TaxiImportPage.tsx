@@ -10,13 +10,16 @@ import { formatHoursValue, formatKwhValue, formatSek } from '../lib/taxilogDispl
 import type { TaxiLogParseResult } from '../types';
 
 const PLACEHOLDER = `TAXILOG_IMPORT
-VERSION=1
-DATE=2026-09-19
+VERSION=2
+DATE=2026-11-02
 
-GROSS_INCOME=1214
-TIPS=0
-WORKED_HOURS=9
-CHARGING_KWH=16.3
+GROSS_INCOME=1500
+OWN_BOOKINGS=800
+OTHER_INCOME=700
+TIPS=100
+BONUS=250
+WORKED_HOURS=8
+CHARGING_KWH=35.5
 
 END_TAXILOG_IMPORT`;
 
@@ -57,7 +60,7 @@ export function TaxiImportPage() {
     <div>
       <PageHeader
         title="Taxi-import"
-        subtitle="Klistra in ett TAXILOG_IMPORT-block och spara dagen"
+        subtitle="VERSION=2 med egna bokningar och bonus. VERSION=1 fungerar fortfarande."
         action={
           <Link to="/admin/taxi">
             <Button variant="secondary">Tillbaka till översikt</Button>
@@ -67,7 +70,7 @@ export function TaxiImportPage() {
 
       <Card className="mb-6 max-w-2xl">
         <Textarea
-          rows={14}
+          rows={16}
           spellCheck={false}
           value={raw}
           onChange={(event) => setRaw(event.target.value)}
@@ -84,14 +87,20 @@ export function TaxiImportPage() {
 
       {parsed ? (
         <Card title="Tolkat" className="max-w-2xl">
-          <p className="mb-4 text-lg font-semibold">{parsed.parsed.date}</p>
+          <p className="mb-4 text-lg font-semibold">
+            {parsed.parsed.date} · VERSION={parsed.parsed.version}
+          </p>
           <div className="mb-6 grid gap-4 sm:grid-cols-2">
             <StatCard label="INKÖRT BRUTTO" value={formatSek(parsed.parsed.grossIncome)} />
+            <StatCard label="EGNA BOKNINGAR" value={formatSek(parsed.parsed.ownBookings)} />
+            <StatCard label="ÖVRIGA KÖRNINGAR" value={formatSek(parsed.parsed.otherIncome)} />
             <StatCard label="DRICKS" value={formatSek(parsed.parsed.tips)} />
+            <StatCard label="BONUS" value={formatSek(parsed.preview.bonus)} />
             <StatCard label="ARBETAD TID" value={formatHoursValue(parsed.parsed.workedHours)} />
             <StatCard label="LADDNING" value={formatKwhValue(parsed.parsed.chargingKwh)} />
             <StatCard label="LÖNEGRUNDANDE" value={formatSek(parsed.preview.netIncome)} />
             <StatCard label="UPPSKATTAD LÖN" value={formatSek(parsed.preview.estimatedSalary)} />
+            <StatCard label="TILL SPARANDE" value={formatSek(parsed.preview.savingsFromDay)} />
           </div>
           <Button type="button" onClick={handleSave} disabled={pending}>
             {pending ? 'Sparar...' : 'Save day'}

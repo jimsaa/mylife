@@ -5,17 +5,19 @@
 import { access, mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { list, put } from '@vercel/blob';
-import { calculateAccruedSalary } from './taxilog/calculations/payroll';
-import { calculateDailyFinancials } from './taxilog/data/dailyFinancials';
 import { parseTaxiLogImport } from './taxilog/import/taxilogImport';
 import {
   buildDailyExportFromState,
   emptyTaxiLogState,
   loadDailyLogFromState,
   loadMonthOverviewFromState,
+  previewImport,
+  recordManualSavingsInState,
   recordSalaryPaymentInState,
   saveDailyLogToState,
   seedRealTaxiLogData,
+  settleMonthInState,
+  unlockMonthInState,
   type DailyLogInput,
   type TaxiLogState,
 } from './taxilog/service';
@@ -115,23 +117,7 @@ export async function getDay(date: string) {
 }
 
 export async function parseText(text: string) {
-  const parsed = parseTaxiLogImport(text);
-  const state = await loadState();
-  const preview = calculateDailyFinancials({
-    grossIncome: parsed.grossIncome,
-    tips: parsed.tips,
-    vatRate: state.vatRate,
-  });
-  return {
-    parsed,
-    preview: {
-      grossIncome: preview.totalIncome.toString(),
-      vatAmount: preview.vatAmount.toFixed(2),
-      netIncome: preview.incomeExVat.toFixed(2),
-      tips: preview.tips.toFixed(2),
-      estimatedSalary: calculateAccruedSalary(preview.incomeExVat).toFixed(2),
-    },
-  };
+  return previewImport(await loadState(), parseTaxiLogImport(text));
 }
 
 export async function saveDay(input: DailyLogInput) {
@@ -153,4 +139,28 @@ export async function addPayment(input: {
   const next = recordSalaryPaymentInState(await loadState(), input.year, input.month, input);
   await saveState(next);
   return loadMonthOverviewFromState(next, input.year, input.month);
+}
+
+export async function settleMonth(year: number, month: number) {
+  const next = settleMonthInState(await loadState(), year, month);
+  await saveState(next);
+  return loadMonthOverviewFromState(next, year, month);
+}
+
+export async function unlockMonth(year: number, month: number) {
+  const next = unlockMonthInState(await loadState(), year, month);
+  await saveState(next);
+  return loadMonthOverviewFromState(next, year, month);
+}
+
+export async function addSavings(input: {
+  date: string;
+  amount: string;
+  kind: 'MANUAL_DEPOSIT' | 'MANUAL_WITHDRAWAL';
+  description: string;
+}) {
+  const next = recordManualSavingsInState(await loadState(), input);
+  await saveState(next);
+  const [year, month] = input.date.split('-').map(Number);
+  return loadMonthOverviewFromState(next, year ?? 0, month ?? 1);
 }

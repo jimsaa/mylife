@@ -20,9 +20,13 @@ END_TAXILOG_IMPORT`;
 test("parses the VERSION=1 daily import", () => {
   const parsed = parseTaxiLogImport(SAMPLE);
   assert.deepEqual(parsed, {
+    version: "1",
     date: "2026-09-19",
     grossIncome: "3300",
+    ownBookings: "0",
+    otherIncome: "3300",
     tips: "150",
+    bonus: "0",
     workedHours: "12.25",
     chargingKwh: "32.4",
   });
@@ -95,4 +99,40 @@ END_TAXILOG_IMPORT`);
 
 test("rejects an invalid import block", () => {
   assert.throws(() => parseTaxiLogImport("GROSS_INCOME=3300"), CalculationError);
+});
+
+test("parses VERSION=2 and rejects a split that does not match gross income", () => {
+  const parsed = parseTaxiLogImport(`TAXILOG_IMPORT
+VERSION=2
+DATE=2026-11-02
+GROSS_INCOME=1500
+OWN_BOOKINGS=800
+OTHER_INCOME=700
+TIPS=100
+BONUS=250
+WORKED_HOURS=8
+CHARGING_KWH=35.5
+END_TAXILOG_IMPORT`);
+  assert.equal(parsed.version, "2");
+  assert.equal(parsed.grossIncome, "1500");
+  assert.equal(parsed.ownBookings, "800");
+  assert.equal(parsed.otherIncome, "700");
+  assert.equal(parsed.tips, "100");
+  assert.equal(parsed.bonus, "250");
+
+  assert.throws(
+    () =>
+      parseTaxiLogImport(`TAXILOG_IMPORT
+VERSION=2
+DATE=2026-11-02
+GROSS_INCOME=1500
+OWN_BOOKINGS=800
+OTHER_INCOME=900
+TIPS=0
+BONUS=0
+WORKED_HOURS=8
+CHARGING_KWH=0
+END_TAXILOG_IMPORT`),
+    CalculationError,
+  );
 });

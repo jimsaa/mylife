@@ -1,5 +1,5 @@
 import { calculateTotalIncome, validateTips } from "../calculations/income";
-import { assertNonNegative } from "../calculations/money";
+import { assertNonNegative, toMoney } from "../calculations/money";
 import { calculateVatBreakdown } from "../calculations/vat";
 import { normalizeUserNumber } from "../format/display";
 
@@ -7,6 +7,7 @@ export function calculateDailyFinancials(input: {
   grossIncome: string;
   tips: string;
   vatRate: string;
+  bonus?: string;
 }) {
   const totalIncome = calculateTotalIncome({
     cashIncome: "0",
@@ -15,11 +16,13 @@ export function calculateDailyFinancials(input: {
     otherIncome: normalizeUserNumber(input.grossIncome),
   });
   const tips = validateTips(normalizeUserNumber(input.tips));
+  const bonus = toMoney(assertNonNegative(normalizeUserNumber(input.bonus ?? "0"), "Bonus kan inte vara negativ."));
   const vat = calculateVatBreakdown(totalIncome, input.vatRate);
 
   return {
     totalIncome,
     tips,
+    bonus,
     vatRate: vat.vatRate,
     vatAmount: vat.vatAmount,
     incomeExVat: vat.incomeExVat,

@@ -3,15 +3,29 @@ import {
   aggregateWorkDaysForPayroll,
   applySalaryPayment,
   buildMonthlyPayrollState,
+  calculateAccruedSalary,
   getSalaryStatusLabelSv,
   type SalaryPaymentRecord,
   type WorkDayPayrollSource,
 } from "./calculations/payroll";
 import { monthPeriod, parseIsoDate, yearMonthFromDate } from "./calculations/period";
+import { CalculationError } from "./calculations/errors";
+import { toMoney } from "./calculations/money";
+import {
+  bonusSourceKey,
+  migrateHistoricalTips,
+  privateNetPaymentNotes,
+  projectSalarySplit,
+  summarizeSavings,
+  surplusSourceKey,
+  tipsSourceKey,
+  upsertSavingsEntry,
+  type SavingsLedgerEntry,
+} from "./calculations/savings";
 import { todayIsoDate } from "./dates/stockholm";
-import { formatDailyExport } from "./import/taxilogImport";
+import { formatDailyExport, type TaxiLogDailyImport } from "./import/taxilogImport";
 import { calculateDailyFinancials, parseChargingKwh, parseWorkedHours } from "./data/dailyFinancials";
-import { DEFAULT_VAT_RATE } from "./settings/defaults";
+import { DEFAULT_PRIVATE_NET_WITHDRAWAL, DEFAULT_VAT_RATE } from "./settings/defaults";
 
 export const HOME_CHARGING_LOCATION = "Hemma";
 
@@ -19,7 +33,10 @@ export type TaxiWorkDayRecord = {
   date: string;
   workHours: string;
   totalIncome: string;
+  ownBookings: string | null;
+  otherIncome: string | null;
   tips: string;
+  bonus: string | null;
   vatRate: string;
   vatAmount: string;
   incomeExVat: string;
@@ -52,6 +69,8 @@ export type TaxiPayrollRecord = {
   paymentDate: string | null;
   paidAmount: string;
   remainingAmount: string;
+  settlementLocked: boolean;
+  settlementLockedAt: string | null;
 };
 
 export type TaxiPaymentRecord = {
@@ -65,10 +84,12 @@ export type TaxiPaymentRecord = {
 
 export type TaxiLogState = {
   vatRate: string;
+  privateNetTarget: string;
   workDays: TaxiWorkDayRecord[];
   charging: TaxiChargingRecord[];
   payrolls: TaxiPayrollRecord[];
   payments: TaxiPaymentRecord[];
+  savingsLedger: SavingsLedgerEntry[];
 };
 
 export type DailyLogInput = {
@@ -77,15 +98,45 @@ export type DailyLogInput = {
   tips: string;
   workedHours: string;
   chargingKwh: string;
+  ownBookings?: string | null;
+  otherIncome?: string | null;
+  bonus?: string | null;
 };
 
 export function emptyTaxiLogState(): TaxiLogState {
   return {
     vatRate: DEFAULT_VAT_RATE,
+    privateNetTarget: DEFAULT_PRIVATE_NET_WITHDRAWAL,
     workDays: [],
     charging: [],
     payrolls: [],
     payments: [],
+    savingsLedger: [],
+  };
+}
+
+export function normalizeTaxiLogState(raw: TaxiLogState): TaxiLogState {
+  const workDays = (raw.workDays ?? []).map((day) => ({
+    ...day,
+    ownBookings: day.ownBookings ?? null,
+    otherIncome: day.otherIncome ?? null,
+    bonus: day.bonus ?? null,
+  }));
+  const payrolls = (raw.payrolls ?? []).map((payroll) => ({
+    ...payroll,
+    settlementLocked: Boolean(payroll.settlementLocked),
+    settlementLockedAt: payroll.settlementLockedAt ?? null,
+  }));
+  const savingsLedger = migrateHistoricalTips(raw.savingsLedger ?? [], workDays);
+
+  return {
+    vatRate: raw.vatRate || DEFAULT_VAT_RATE,
+    privateNetTarget: raw.privateNetTarget || DEFAULT_PRIVATE_NET_WITHDRAWAL,
+    workDays,
+    charging: raw.charging ?? [],
+    payrolls,
+    payments: raw.payments ?? [],
+    savingsLedger,
   };
 }
 
@@ -101,6 +152,30 @@ function toSource(day: TaxiWorkDayRecord): WorkDayPayrollSource {
     vatAmount: day.vatAmount,
     incomeExVat: day.incomeExVat,
     totalCosts: day.totalCosts,
+  };
+}
+
+function isMonthLocked(state: TaxiLogState, year: number, month: number): boolean {
+  return Boolean(state.payrolls.find((row) => row.year === year && row.month === month)?.settlementLocked);
+}
+
+function assertMonthUnlocked(state: TaxiLogState, year: number, month: number) {
+  if (isMonthLocked(state, year, month)) {
+    throw new CalculationError(
+      "MONTH_LOCKED",
+      "Månaden är låst. Lås upp med en uttrycklig korrigering innan du ändrar.",
+    );
+  }
+}
+
+function sumKnown(values: Array<string | null>): { value: string | null; known: boolean } {
+  const known = values.filter((value): value is string => value !== null && value !== undefined);
+  if (known.length === 0) {
+    return { value: null, known: false };
+  }
+  return {
+    value: known.reduce((sum, value) => sum.plus(value), new Decimal(0)).toString(),
+    known: true,
   };
 }
 
@@ -123,6 +198,7 @@ export function syncPayrollInState(state: TaxiLogState, year: number, month: num
     asOfDate,
   });
 
+  const existing = state.payrolls.find((row) => row.year === year && row.month === month);
   const payroll: TaxiPayrollRecord = {
     year: nextState.year,
     month: nextState.month,
@@ -141,6 +217,8 @@ export function syncPayrollInState(state: TaxiLogState, year: number, month: num
     paymentDate: nextState.paymentDate,
     paidAmount: nextState.totalPaid.toFixed(2),
     remainingAmount: nextState.remainingAmount.toFixed(2),
+    settlementLocked: existing?.settlementLocked ?? false,
+    settlementLockedAt: existing?.settlementLockedAt ?? null,
   };
 
   return {
@@ -149,22 +227,53 @@ export function syncPayrollInState(state: TaxiLogState, year: number, month: num
   };
 }
 
+function applyDaySavings(state: TaxiLogState, date: string, tips: string, bonus: string | null): TaxiLogState {
+  let ledger = upsertSavingsEntry(state.savingsLedger, {
+    occurredAt: date,
+    kind: "TIPS",
+    amount: tips,
+    sourceKey: tipsSourceKey(date),
+    description: `Dricks ${date}`,
+  });
+  if (bonus !== null) {
+    ledger = upsertSavingsEntry(ledger, {
+      occurredAt: date,
+      kind: "BONUS",
+      amount: bonus,
+      sourceKey: bonusSourceKey(date),
+      description: `Bonus ${date}`,
+    });
+  }
+  return { ...state, savingsLedger: ledger };
+}
+
 export function saveDailyLogToState(state: TaxiLogState, input: DailyLogInput): TaxiLogState {
   parseIsoDate(input.date);
-  const vatRate = state.vatRate || DEFAULT_VAT_RATE;
+  const normalized = normalizeTaxiLogState(state);
+  const period = yearMonthFromDate(input.date);
+  assertMonthUnlocked(normalized, period.year, period.month);
+
+  const vatRate = normalized.vatRate || DEFAULT_VAT_RATE;
   const financials = calculateDailyFinancials({
     grossIncome: input.grossIncome,
     tips: input.tips,
+    bonus: input.bonus ?? "0",
     vatRate,
   });
   const workedHours = parseWorkedHours(input.workedHours);
   const kwh = parseChargingKwh(input.chargingKwh);
+  const bonus = input.bonus === undefined ? null : financials.bonus.toFixed(2);
+  const ownBookings = input.ownBookings === undefined ? null : input.ownBookings;
+  const otherIncome = input.otherIncome === undefined ? null : input.otherIncome;
 
   const workDay: TaxiWorkDayRecord = {
     date: input.date,
     workHours: workedHours.toString(),
     totalIncome: financials.totalIncome.toFixed(2),
+    ownBookings,
+    otherIncome,
     tips: financials.tips.toFixed(2),
+    bonus,
     vatRate: financials.vatRate.toString(),
     vatAmount: financials.vatAmount.toFixed(2),
     incomeExVat: financials.incomeExVat.toFixed(2),
@@ -179,26 +288,31 @@ export function saveDailyLogToState(state: TaxiLogState, input: DailyLogInput): 
     location: HOME_CHARGING_LOCATION,
   };
 
-  const next: TaxiLogState = {
-    ...state,
-    workDays: [...state.workDays.filter((day) => day.date !== input.date), workDay],
-    charging: [
-      ...state.charging.filter(
-        (session) => !(session.date === input.date && session.location === HOME_CHARGING_LOCATION),
-      ),
-      charging,
-    ],
-  };
+  const next: TaxiLogState = applyDaySavings(
+    {
+      ...normalized,
+      workDays: [...normalized.workDays.filter((day) => day.date !== input.date), workDay],
+      charging: [
+        ...normalized.charging.filter(
+          (session) => !(session.date === input.date && session.location === HOME_CHARGING_LOCATION),
+        ),
+        charging,
+      ],
+    },
+    input.date,
+    financials.tips.toFixed(2),
+    bonus,
+  );
 
-  const period = yearMonthFromDate(input.date);
   return syncPayrollInState(next, period.year, period.month, todayIsoDate());
 }
 
 export function loadDailyLogFromState(state: TaxiLogState, date: string) {
-  const workDay = state.workDays.find((day) => day.date === date);
+  const normalized = normalizeTaxiLogState(state);
+  const workDay = normalized.workDays.find((day) => day.date === date);
   const charging =
-    state.charging.find((session) => session.date === date && session.location === HOME_CHARGING_LOCATION) ??
-    state.charging.find((session) => session.date === date);
+    normalized.charging.find((session) => session.date === date && session.location === HOME_CHARGING_LOCATION) ??
+    normalized.charging.find((session) => session.date === date);
 
   if (!workDay && !charging) {
     return null;
@@ -207,21 +321,25 @@ export function loadDailyLogFromState(state: TaxiLogState, date: string) {
   return {
     date,
     grossIncome: workDay?.totalIncome ?? "0",
+    ownBookings: workDay?.ownBookings ?? null,
+    otherIncome: workDay?.otherIncome ?? null,
     netIncome: workDay?.incomeExVat ?? "0",
     vatAmount: workDay?.vatAmount ?? "0",
-    vatRate: workDay?.vatRate ?? state.vatRate,
+    vatRate: workDay?.vatRate ?? normalized.vatRate,
     tips: workDay?.tips ?? "0",
+    bonus: workDay?.bonus ?? null,
     workedHours: workDay?.workHours ?? "0",
     chargingKwh: charging?.kwh ?? "0",
   };
 }
 
 export function loadMonthOverviewFromState(state: TaxiLogState, year: number, month: number) {
+  const normalized = normalizeTaxiLogState(state);
   const period = monthPeriod(year, month);
-  const workDays = state.workDays.filter(
+  const workDays = normalized.workDays.filter(
     (day) => day.date >= period.periodStart && day.date <= period.periodEnd,
   );
-  const chargingSessions = state.charging.filter(
+  const chargingSessions = normalized.charging.filter(
     (session) => session.date >= period.periodStart && session.date <= period.periodEnd,
   );
 
@@ -233,7 +351,7 @@ export function loadMonthOverviewFromState(state: TaxiLogState, year: number, mo
     }
   }
 
-  const payments = state.payments
+  const payments = normalized.payments
     .filter((payment) => payment.year === year && payment.month === month)
     .map((payment) => ({
       paymentDate: payment.paymentDate,
@@ -251,6 +369,15 @@ export function loadMonthOverviewFromState(state: TaxiLogState, year: number, mo
     (sum, value) => sum.plus(value),
     new Decimal(0),
   );
+  const own = sumKnown(workDays.map((day) => day.ownBookings));
+  const other = sumKnown(workDays.map((day) => day.otherIncome));
+  const bonus = sumKnown(workDays.map((day) => day.bonus));
+  const split = projectSalarySplit(payroll.accruedSalary, normalized.privateNetTarget);
+  const existing = normalized.payrolls.find((row) => row.year === year && row.month === month);
+  const savings = summarizeSavings(normalized.savingsLedger, year, month);
+  const privateNetTaken = normalized.payments
+    .filter((payment) => payment.year === year && payment.month === month && payment.notes === privateNetPaymentNotes(year, month))
+    .reduce((sum, payment) => sum.plus(payment.amount), new Decimal(0));
 
   return {
     year,
@@ -258,9 +385,12 @@ export function loadMonthOverviewFromState(state: TaxiLogState, year: number, mo
     periodStart: period.periodStart,
     periodEnd: period.periodEnd,
     grossIncome: payroll.totalIncome.toString(),
+    ownBookings: own.value,
+    otherIncome: other.value,
     vatAmount: payroll.totalVat.toString(),
     netIncome: payroll.totalIncomeExVat.toString(),
     tips: payroll.totalTips.toString(),
+    bonus: bonus.value,
     workedHours: payroll.totalWorkHours.toString(),
     chargingKwh: chargingKwh.toString(),
     accruedSalary: payroll.accruedSalary.toString(),
@@ -268,11 +398,22 @@ export function loadMonthOverviewFromState(state: TaxiLogState, year: number, mo
     salaryRemaining: payroll.remainingAmount.toString(),
     salaryStatus: payroll.salaryStatus,
     salaryStatusLabel: getSalaryStatusLabelSv(payroll.salaryStatus),
+    privateNetTarget: split.privateNetTarget.toFixed(2),
+    projectedPrivateNet: split.projectedPrivateNet.toFixed(2),
+    projectedSurplus: split.projectedSurplus.toFixed(2),
+    projectedShortfall: split.projectedShortfall.toFixed(2),
+    privateNetTaken: toMoney(privateNetTaken).toFixed(2),
+    settlementLocked: existing?.settlementLocked ?? false,
+    settlementLockedAt: existing?.settlementLockedAt ?? null,
+    savings,
     days: workDays.map((day) => ({
       date: day.date,
       grossIncome: day.totalIncome,
+      ownBookings: day.ownBookings,
+      otherIncome: day.otherIncome,
       netIncome: day.incomeExVat,
       tips: day.tips,
+      bonus: day.bonus,
       workedHours: day.workHours,
       chargingKwh: chargingByDate.get(day.date) ?? "0",
     })),
@@ -284,13 +425,18 @@ export function buildDailyExportFromState(state: TaxiLogState, date: string): st
   if (!log) {
     return null;
   }
-  return formatDailyExport({
+  const exportInput: TaxiLogDailyImport = {
+    version: log.ownBookings !== null || log.bonus ? "2" : "1",
     date: log.date,
     grossIncome: log.grossIncome,
+    ownBookings: log.ownBookings,
+    otherIncome: log.otherIncome,
     tips: log.tips,
+    bonus: log.bonus ?? "0",
     workedHours: log.workedHours,
     chargingKwh: log.chargingKwh,
-  });
+  };
+  return formatDailyExport(exportInput);
 }
 
 export function recordSalaryPaymentInState(
@@ -299,18 +445,20 @@ export function recordSalaryPaymentInState(
   month: number,
   payment: { paymentDate: string; amount: string; notes?: string | null },
 ): TaxiLogState {
+  const normalized = normalizeTaxiLogState(state);
+  assertMonthUnlocked(normalized, year, month);
   const current = buildMonthlyPayrollState({
     totals: aggregateWorkDaysForPayroll(
       year,
       month,
-      state.workDays
+      normalized.workDays
         .filter((day) => {
           const period = monthPeriod(year, month);
           return day.date >= period.periodStart && day.date <= period.periodEnd;
         })
         .map(toSource),
     ),
-    payments: state.payments
+    payments: normalized.payments
       .filter((row) => row.year === year && row.month === month)
       .map((row) => ({
         paymentDate: row.paymentDate,
@@ -331,11 +479,11 @@ export function recordSalaryPaymentInState(
   );
 
   const next: TaxiLogState = {
-    ...state,
+    ...normalized,
     payments: [
-      ...state.payments,
+      ...normalized.payments,
       {
-        id: `pay_${year}_${month}_${Date.now()}`,
+        id: `pay_${year}_${month}_${payment.notes ?? payment.paymentDate}_${payment.amount}`,
         year,
         month,
         paymentDate: payment.paymentDate,
@@ -346,6 +494,74 @@ export function recordSalaryPaymentInState(
   };
 
   return syncPayrollInState(next, year, month, todayIsoDate());
+}
+
+export function settleMonthInState(state: TaxiLogState, year: number, month: number, asOfDate = todayIsoDate()) {
+  const normalized = normalizeTaxiLogState(state);
+  assertMonthUnlocked(normalized, year, month);
+  const overview = loadMonthOverviewFromState(normalized, year, month);
+  let next = normalized;
+
+  const notes = privateNetPaymentNotes(year, month);
+  const alreadyPaid = next.payments.some((payment) => payment.year === year && payment.month === month && payment.notes === notes);
+  if (!alreadyPaid && toMoney(overview.projectedPrivateNet).greaterThan(0)) {
+    next = recordSalaryPaymentInState(next, year, month, {
+      paymentDate: asOfDate,
+      amount: overview.projectedPrivateNet,
+      notes,
+    });
+  }
+
+  next = {
+    ...next,
+    savingsLedger: upsertSavingsEntry(next.savingsLedger, {
+      occurredAt: asOfDate,
+      kind: "SALARY_SURPLUS",
+      amount: overview.projectedSurplus,
+      sourceKey: surplusSourceKey(year, month),
+      description: `Löneöverskott ${year}-${month}`,
+    }),
+  };
+
+  next = syncPayrollInState(next, year, month, asOfDate);
+  return {
+    ...next,
+    payrolls: next.payrolls.map((payroll) =>
+      payroll.year === year && payroll.month === month
+        ? { ...payroll, settlementLocked: true, settlementLockedAt: asOfDate }
+        : payroll,
+    ),
+  };
+}
+
+export function unlockMonthInState(state: TaxiLogState, year: number, month: number) {
+  const normalized = normalizeTaxiLogState(state);
+  return {
+    ...normalized,
+    payrolls: normalized.payrolls.map((payroll) =>
+      payroll.year === year && payroll.month === month
+        ? { ...payroll, settlementLocked: false, settlementLockedAt: null }
+        : payroll,
+    ),
+  };
+}
+
+export function recordManualSavingsInState(
+  state: TaxiLogState,
+  input: { date: string; amount: string; kind: "MANUAL_DEPOSIT" | "MANUAL_WITHDRAWAL"; description: string },
+) {
+  const normalized = normalizeTaxiLogState(state);
+  parseIsoDate(input.date);
+  return {
+    ...normalized,
+    savingsLedger: upsertSavingsEntry(normalized.savingsLedger, {
+      occurredAt: input.date,
+      kind: input.kind,
+      amount: input.amount,
+      sourceKey: `manual:${input.kind}:${input.date}:${input.amount}:${input.description}`,
+      description: input.description,
+    }),
+  };
 }
 
 export const TAXILOG_SEED_DAYS: DailyLogInput[] = [
@@ -366,8 +582,32 @@ export const TAXILOG_SEED_DAYS: DailyLogInput[] = [
 ];
 
 export function seedRealTaxiLogData(state: TaxiLogState): TaxiLogState {
-  if (state.workDays.length > 0) {
-    return state;
+  const normalized = normalizeTaxiLogState(state);
+  if (normalized.workDays.length > 0) {
+    return normalized;
   }
-  return TAXILOG_SEED_DAYS.reduce((current, day) => saveDailyLogToState(current, day), state);
+  return TAXILOG_SEED_DAYS.reduce((current, day) => saveDailyLogToState(current, day), normalized);
+}
+
+export function previewImport(state: TaxiLogState, parsed: TaxiLogDailyImport) {
+  const financials = calculateDailyFinancials({
+    grossIncome: parsed.grossIncome,
+    tips: parsed.tips,
+    bonus: parsed.bonus,
+    vatRate: state.vatRate || DEFAULT_VAT_RATE,
+  });
+  return {
+    parsed,
+    preview: {
+      grossIncome: financials.totalIncome.toString(),
+      ownBookings: parsed.ownBookings,
+      otherIncome: parsed.otherIncome,
+      vatAmount: financials.vatAmount.toFixed(2),
+      netIncome: financials.incomeExVat.toFixed(2),
+      tips: financials.tips.toFixed(2),
+      bonus: financials.bonus.toFixed(2),
+      estimatedSalary: calculateAccruedSalary(financials.incomeExVat).toFixed(2),
+      savingsFromDay: financials.tips.plus(financials.bonus).toFixed(2),
+    },
+  };
 }

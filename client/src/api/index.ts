@@ -168,11 +168,24 @@ export const taxiLogApi = {
     tips: string;
     workedHours: string;
     chargingKwh: string;
+    ownBookings?: string | null;
+    otherIncome?: string | null;
+    bonus?: string | null;
   }) =>
     api.post<{ day: TaxiLogMonth['days'][number] | null; exportText: string | null }>(
       '/taxi-log/day',
       data,
     ),
+  settle: (year: number, month: number) =>
+    api.post<TaxiLogMonth>('/taxi-log/settle', { year, month }),
+  unlock: (year: number, month: number) =>
+    api.post<TaxiLogMonth>('/taxi-log/unlock', { year, month }),
+  savings: (data: {
+    date: string;
+    amount: string;
+    kind: 'MANUAL_DEPOSIT' | 'MANUAL_WITHDRAWAL';
+    description: string;
+  }) => api.post<TaxiLogMonth>('/taxi-log/savings', data),
 };
 
 export const goalApi = {

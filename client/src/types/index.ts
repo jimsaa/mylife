@@ -342,12 +342,35 @@ export interface FoodEntry {
 export interface TaxiLogDay {
   date: string;
   grossIncome: string;
+  ownBookings: string | null;
+  otherIncome: string | null;
   netIncome: string;
   vatAmount?: string;
   vatRate?: string;
   tips: string;
+  bonus: string | null;
   workedHours: string;
   chargingKwh: string;
+}
+
+export interface TaxiLogSavings {
+  total: string;
+  fromTips: string;
+  fromBonus: string;
+  fromSalarySurplus: string;
+  fromManualDeposits: string;
+  fromManualWithdrawals: string;
+  monthTotal: string;
+  monthTips: string;
+  monthBonus: string;
+  monthSalarySurplus: string;
+  history: Array<{
+    occurredAt: string;
+    kind: string;
+    amount: string;
+    description: string;
+  }>;
+  growth: Array<{ year: number; month: number; balance: string }>;
 }
 
 export interface TaxiLogMonth {
@@ -356,9 +379,12 @@ export interface TaxiLogMonth {
   periodStart: string;
   periodEnd: string;
   grossIncome: string;
+  ownBookings: string | null;
+  otherIncome: string | null;
   vatAmount: string;
   netIncome: string;
   tips: string;
+  bonus: string | null;
   workedHours: string;
   chargingKwh: string;
   accruedSalary: string;
@@ -366,23 +392,39 @@ export interface TaxiLogMonth {
   salaryRemaining: string;
   salaryStatus: string;
   salaryStatusLabel: string;
+  privateNetTarget: string;
+  projectedPrivateNet: string;
+  projectedSurplus: string;
+  projectedShortfall: string;
+  privateNetTaken: string;
+  settlementLocked: boolean;
+  settlementLockedAt: string | null;
+  savings: TaxiLogSavings;
   days: TaxiLogDay[];
 }
 
 export interface TaxiLogParseResult {
   parsed: {
+    version: string;
     date: string;
     grossIncome: string;
+    ownBookings: string | null;
+    otherIncome: string | null;
     tips: string;
+    bonus: string;
     workedHours: string;
     chargingKwh: string;
   };
   preview: {
     grossIncome: string;
+    ownBookings: string | null;
+    otherIncome: string | null;
     vatAmount: string;
     netIncome: string;
     tips: string;
+    bonus: string;
     estimatedSalary: string;
+    savingsFromDay: string;
   };
 }
 

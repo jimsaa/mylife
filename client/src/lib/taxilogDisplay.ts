@@ -15,7 +15,8 @@ const MONTH_NAMES_SV = [
 
 const WEEKDAY_SHORT_SV = ['Sön', 'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör'] as const;
 
-export function formatSek(value: string | number): string {
+export function formatSek(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '—';
   const amount = Number(value);
   if (!Number.isFinite(amount)) return '0 kr';
   const [whole, fraction] = amount.toFixed(2).split('.');

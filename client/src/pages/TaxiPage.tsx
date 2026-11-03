@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { taxiLogApi } from '../api';
 import { TaxiIncomeChart } from '../components/taxi/TaxiIncomeChart';
+import { TrendChart } from '../components/charts/Charts';
 import { PageHeader } from '../components/layout/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { Field, Input } from '../components/ui/Input';
 import { StatCard } from '../components/ui/StatCard';
 import {
   buildMonthChartDays,
@@ -32,12 +34,29 @@ export function TaxiPage() {
   const [overview, setOverview] = useState<TaxiLogMonth | null>(null);
   const [exportText, setExportText] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+  const [savingsForm, setSavingsForm] = useState({
+    date: `${year}-${String(month).padStart(2, '0')}-01`,
+    amount: '',
+    description: '',
+    kind: 'MANUAL_DEPOSIT' as 'MANUAL_DEPOSIT' | 'MANUAL_WITHDRAWAL',
+  });
 
-  useEffect(() => {
+  const loadMonth = () =>
     taxiLogApi
       .month(year, month)
       .then(setOverview)
       .catch((err: Error) => setError(err.message));
+
+  useEffect(() => {
+    loadMonth();
+  }, [year, month]);
+
+  useEffect(() => {
+    setSavingsForm((current) => ({
+      ...current,
+      date: `${year}-${String(month).padStart(2, '0')}-01`,
+    }));
   }, [year, month]);
 
   useEffect(() => {
@@ -58,6 +77,10 @@ export function TaxiPage() {
   const selectedDay = overview?.days.find((day) => day.date === selectedDate);
   const previous = previousYearMonth(year, month);
   const next = nextYearMonth(year, month);
+  const growth = (overview?.savings.growth ?? []).map((point) => ({
+    date: `${point.year}-${String(point.month).padStart(2, '0')}`,
+    value: Number(point.balance),
+  }));
 
   const goToMonth = (nextYear: number, nextMonth: number) => {
     const nextParams = new URLSearchParams();
@@ -66,11 +89,23 @@ export function TaxiPage() {
     setParams(nextParams);
   };
 
+  const runAction = async (action: () => Promise<TaxiLogMonth>) => {
+    setPending(true);
+    setError('');
+    try {
+      setOverview(await action());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Åtgärden misslyckades.');
+    } finally {
+      setPending(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
         title="Taxi"
-        subtitle="Månadsöversikt för inkomst, lönegrundande och laddning"
+        subtitle="Intäkter, lön och ackumulerat sparande"
         action={
           <Link to="/admin/taxi/import">
             <Button>Import</Button>
@@ -108,7 +143,7 @@ export function TaxiPage() {
             <StatCard label="INKÖRT BRUTTO" value={formatSek(overview.grossIncome)} />
             <StatCard label="LÖNEGRUNDANDE" value={formatSek(overview.netIncome)} />
             <StatCard label="UPPSKATTAD LÖN" value={formatSek(overview.accruedSalary)} />
-            <StatCard label="LADDNING" value={formatKwhValue(overview.chargingKwh)} />
+            <StatCard label="SPARANDE" value={formatSek(overview.savings.total)} />
           </div>
 
           <Card className="mb-6">
@@ -123,10 +158,13 @@ export function TaxiPage() {
           {selectedDate ? (
             <Card title="Vald dag" className="mb-6">
               <p className="mb-4 text-xl font-semibold">{formatDateTitleSv(selectedDate)}</p>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <StatCard label="INKÖRT BRUTTO" value={formatSek(selectedDay?.grossIncome ?? '0')} />
+                <StatCard label="EGNA BOKNINGAR" value={formatSek(selectedDay?.ownBookings)} />
+                <StatCard label="ÖVRIGA KÖRNINGAR" value={formatSek(selectedDay?.otherIncome)} />
                 <StatCard label="INKÖRT NETTO" value={formatSek(selectedDay?.netIncome ?? '0')} />
                 <StatCard label="DRICKS" value={formatSek(selectedDay?.tips ?? '0')} />
+                <StatCard label="BONUS" value={formatSek(selectedDay?.bonus)} />
                 <StatCard label="ARBETAD TID" value={formatHoursValue(selectedDay?.workedHours ?? '0')} />
                 <StatCard label="LADDNING" value={formatKwhValue(selectedDay?.chargingKwh ?? '0')} />
               </div>
@@ -138,6 +176,149 @@ export function TaxiPage() {
             </Card>
           ) : null}
 
+          <Card title="Intäkter" className="mb-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <StatCard label="TOTALT INKÖRT" value={formatSek(overview.grossIncome)} />
+              <StatCard label="EGNA BOKNINGAR" value={formatSek(overview.ownBookings)} />
+              <StatCard label="ÖVRIGA KÖRNINGAR" value={formatSek(overview.otherIncome)} />
+              <StatCard label="DRICKS" value={formatSek(overview.tips)} />
+              <StatCard label="BONUS" value={formatSek(overview.bonus)} />
+            </div>
+          </Card>
+
+          <Card title="Lön" className="mb-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <StatCard label="BERÄKNAD LÖNEGRUND" value={formatSek(overview.netIncome)} />
+              <StatCard label="BERÄKNAD LÖN" value={formatSek(overview.accruedSalary)} hint={overview.salaryStatusLabel} />
+              <StatCard label="PRIVAT NETTOUTTAG" value={formatSek(overview.privateNetTarget)} />
+              <StatCard label="PLANERAT UTTAG" value={formatSek(overview.projectedPrivateNet)} />
+              <StatCard label="FAKTISKT UTTAG" value={formatSek(overview.privateNetTaken)} />
+              <StatCard
+                label={Number(overview.projectedShortfall) > 0 ? 'SAKNAS TILL 13 000' : 'ÖVERSKOTT TILL SPARANDE'}
+                value={formatSek(
+                  Number(overview.projectedShortfall) > 0 ? overview.projectedShortfall : overview.projectedSurplus,
+                )}
+              />
+            </div>
+          </Card>
+
+          <Card title="Månadsavräkning" className="mb-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <StatCard label="1. TOTALT INKÖRT" value={formatSek(overview.grossIncome)} />
+              <StatCard label="2. EGNA BOKNINGAR" value={formatSek(overview.ownBookings)} />
+              <StatCard label="3. ÖVRIGA KÖRNINGAR" value={formatSek(overview.otherIncome)} />
+              <StatCard label="4. DRICKS" value={formatSek(overview.tips)} />
+              <StatCard label="5. BONUS" value={formatSek(overview.bonus)} />
+              <StatCard label="6. BERÄKNAD LÖN" value={formatSek(overview.accruedSalary)} />
+              <StatCard label="7. PRIVAT NETTOUTTAG" value={formatSek(overview.privateNetTaken)} />
+              <StatCard label="8. LÖNEÖVERSKOTT" value={formatSek(overview.savings.monthSalarySurplus)} />
+              <StatCard label="9. DRICKS + BONUS" value={formatSek(Number(overview.savings.monthTips) + Number(overview.savings.monthBonus))} />
+              <StatCard label="10. MÅNADENS SPARANDE" value={formatSek(overview.savings.monthTotal)} />
+              <StatCard label="11. ACKUMULERAT SPARSALDO" value={formatSek(overview.savings.total)} />
+            </div>
+            <p className="mt-4 text-sm text-text-muted">
+              {overview.settlementLocked
+                ? `Månaden är låst${overview.settlementLockedAt ? ` ${overview.settlementLockedAt}` : ''}. 13 000 kr tas inte ut förrän avräkningen bekräftas.`
+                : '13 000 kr tas inte ut förrän månadsavräkningen bekräftas. Överskott och privat uttag bokförs då.'}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button
+                disabled={pending || overview.settlementLocked}
+                onClick={() => runAction(() => taxiLogApi.settle(year, month))}
+              >
+                Bekräfta och lås månad
+              </Button>
+              {overview.settlementLocked ? (
+                <Button
+                  variant="secondary"
+                  disabled={pending}
+                  onClick={() => runAction(() => taxiLogApi.unlock(year, month))}
+                >
+                  Lås upp för korrigering
+                </Button>
+              ) : null}
+            </div>
+          </Card>
+
+          <Card title="Sparande" className="mb-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <StatCard label="TOTALT SPARANDE" value={formatSek(overview.savings.total)} />
+              <StatCard label="DRICKS" value={formatSek(overview.savings.fromTips)} />
+              <StatCard label="BONUS" value={formatSek(overview.savings.fromBonus)} />
+              <StatCard label="LÖNEÖVERSKOTT" value={formatSek(overview.savings.fromSalarySurplus)} />
+              <StatCard label="DENNA MÅNAD" value={formatSek(overview.savings.monthTotal)} />
+            </div>
+            {growth.length > 0 ? (
+              <div className="mt-6">
+                <TrendChart data={growth} label="Sparsaldo" color="#0d9488" unit=" kr" />
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-text-muted">Ingen sparkurva ännu.</p>
+            )}
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Field label="Datum">
+                <Input
+                  type="date"
+                  value={savingsForm.date}
+                  onChange={(event) => setSavingsForm({ ...savingsForm, date: event.target.value })}
+                />
+              </Field>
+              <Field label="Belopp">
+                <Input
+                  value={savingsForm.amount}
+                  onChange={(event) => setSavingsForm({ ...savingsForm, amount: event.target.value })}
+                />
+              </Field>
+              <Field label="Beskrivning">
+                <Input
+                  value={savingsForm.description}
+                  onChange={(event) => setSavingsForm({ ...savingsForm, description: event.target.value })}
+                />
+              </Field>
+              <div className="flex items-end gap-2 pb-3">
+                <Button
+                  disabled={pending || !savingsForm.amount}
+                  onClick={() =>
+                    runAction(() =>
+                      taxiLogApi.savings({
+                        ...savingsForm,
+                        kind: 'MANUAL_DEPOSIT',
+                      }),
+                    )
+                  }
+                >
+                  Insättning
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={pending || !savingsForm.amount}
+                  onClick={() =>
+                    runAction(() =>
+                      taxiLogApi.savings({
+                        ...savingsForm,
+                        kind: 'MANUAL_WITHDRAWAL',
+                      }),
+                    )
+                  }
+                >
+                  Uttag
+                </Button>
+              </div>
+            </div>
+            {overview.savings.history.length > 0 ? (
+              <ul className="mt-4 divide-y divide-border text-sm">
+                {[...overview.savings.history].reverse().slice(0, 12).map((entry, index) => (
+                  <li key={`${entry.occurredAt}-${entry.kind}-${entry.description}-${index}`} className="flex justify-between py-2">
+                    <span>
+                      {entry.occurredAt} · {entry.description}
+                    </span>
+                    <span className="font-medium">{formatSek(entry.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </Card>
+
           <Card title="Statistik">
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <StatCard label="INKÖRT BRUTTO" value={formatSek(overview.grossIncome)} />
@@ -145,11 +326,7 @@ export function TaxiPage() {
               <StatCard label="DRICKS" value={formatSek(overview.tips)} />
               <StatCard label="ARBETAD TID" value={formatHoursValue(overview.workedHours)} />
               <StatCard label="LADDNING" value={formatKwhValue(overview.chargingKwh)} />
-              <StatCard
-                label="ACKUMULERAD LÖN"
-                value={formatSek(overview.accruedSalary)}
-                hint={overview.salaryStatusLabel}
-              />
+              <StatCard label="ACKUMULERAD LÖN" value={formatSek(overview.accruedSalary)} hint={overview.salaryStatusLabel} />
             </div>
           </Card>
         </>

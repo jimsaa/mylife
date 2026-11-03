@@ -2,11 +2,14 @@ import { Router } from 'express';
 import { CalculationError } from '../lib/taxilog/calculations/errors.js';
 import {
   addTaxiSalaryPayment,
+  addTaxiSavingsEntry,
   getTaxiLogDay,
   getTaxiLogExport,
   getTaxiLogMonth,
   parseTaxiLogText,
   saveTaxiLogDay,
+  settleTaxiLogMonth,
+  unlockTaxiLogMonth,
 } from '../services/taxiLogService.js';
 
 const router = Router();
@@ -59,6 +62,9 @@ router.post('/day', (req, res) => {
       tips: String(req.body.tips ?? '0'),
       workedHours: String(req.body.workedHours ?? '0'),
       chargingKwh: String(req.body.chargingKwh ?? '0'),
+      ownBookings: req.body.ownBookings ?? undefined,
+      otherIncome: req.body.otherIncome ?? undefined,
+      bonus: req.body.bonus ?? undefined,
     });
     res.status(201).json({ day: saved, exportText: getTaxiLogExport(saved?.date ?? req.body.date) });
   } catch (error) {
@@ -75,6 +81,37 @@ router.post('/payment', (req, res) => {
         paymentDate: String(req.body.paymentDate ?? ''),
         amount: String(req.body.amount ?? ''),
         notes: req.body.notes ?? null,
+      }),
+    );
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+router.post('/settle', (req, res) => {
+  try {
+    res.status(201).json(settleTaxiLogMonth(Number(req.body.year), Number(req.body.month)));
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+router.post('/unlock', (req, res) => {
+  try {
+    res.json(unlockTaxiLogMonth(Number(req.body.year), Number(req.body.month)));
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+router.post('/savings', (req, res) => {
+  try {
+    res.status(201).json(
+      addTaxiSavingsEntry({
+        date: String(req.body.date ?? ''),
+        amount: String(req.body.amount ?? ''),
+        kind: req.body.kind === 'MANUAL_WITHDRAWAL' ? 'MANUAL_WITHDRAWAL' : 'MANUAL_DEPOSIT',
+        description: String(req.body.description ?? ''),
       }),
     );
   } catch (error) {
