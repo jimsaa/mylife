@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { readTaxiLogState } from '../taxi-log-store';
 import { buildTaxiLogReport } from './calculations/taxiLogReport';
+import { readTaxiLogEmailSettings, sendTaxiLogReportEmail } from './taxiLogReportEmail';
 import { methodNotAllowed, readJsonBody, requireAdmin } from '../vercel-http';
 
 function headerValue(value: string | string[] | undefined): string {
@@ -40,7 +41,17 @@ export async function handleTaxiLogReport(req: VercelRequest, res: VercelRespons
       return;
     }
     const report = buildTaxiLogReport(await readTaxiLogState(), date);
-    res.status(200).json(report);
+    const email = readTaxiLogEmailSettings();
+    if (!email.ok) {
+      res.status(400).json({ error: email.error });
+      return;
+    }
+    const sent = await sendTaxiLogReportEmail(report, email.settings);
+    if (!sent.ok) {
+      res.status(502).json({ error: sent.error });
+      return;
+    }
+    res.status(200).json({ sent: true, recipient: email.settings.to });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Request failed';
     res.status(400).json({ error: message });

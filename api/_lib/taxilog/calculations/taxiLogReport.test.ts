@@ -196,6 +196,23 @@ function request(method: string, body: unknown, origin = 'http://localhost:3000'
   } as VercelRequest;
 }
 
+const EMAIL_ENV_KEYS = ['EMAIL_PROVIDER', 'RESEND_API_KEY', 'EMAIL_FROM', 'TAXILOG_REPORT_TO'] as const;
+
+function useEmailEnv(): () => void {
+  const previous = Object.fromEntries(EMAIL_ENV_KEYS.map((key) => [key, process.env[key]]));
+  process.env.EMAIL_PROVIDER = 'resend';
+  process.env.RESEND_API_KEY = 'test-key';
+  process.env.EMAIL_FROM = 'TaxiLog <reports@example.com>';
+  process.env.TAXILOG_REPORT_TO = 'report-test@example.com';
+  return () => {
+    for (const key of EMAIL_ENV_KEYS) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
+
 describe('TaxiLog report route', () => {
   afterEach(() => {
     setTaxiLogBlobIOForTests(null);
@@ -222,7 +239,54 @@ describe('TaxiLog report route', () => {
     assert.equal(io.puts.length, 0);
   });
 
-  it('reads stored days without seeding or writing and returns the report', async () => {
+  it('does not send when the date is missing or email is not configured', async () => {
+    const stored = state([
+      workDay({
+        date: '2026-11-04',
+        workHours: '8',
+        ownBookings: '1000.00',
+        handUp: '0.00',
+        uberIncome: '0.00',
+        boltIncome: '0.00',
+        bonus: null,
+        tips: '0.00',
+      }),
+    ]);
+    const io = createMemoryTaxiLogBlobIO({ privateBody: JSON.stringify(stored) });
+    setTaxiLogBlobIOForTests(io);
+    let fetchCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', { status: 200 });
+    };
+    const restoreEnv = useEmailEnv();
+    delete process.env.EMAIL_PROVIDER;
+
+    try {
+      const missingDay = mockResponse();
+      await handleTaxiLogReport(request('POST', { date: '2026-09-18' }), missingDay as never);
+      assert.equal(missingDay.statusCode, 400);
+      assert.match(String((missingDay.body as { error: string }).error), /Ingen registrerad arbetsdag/);
+
+      const invalid = mockResponse();
+      await handleTaxiLogReport(request('POST', { date: '2026-13-40' }), invalid as never);
+      assert.equal(invalid.statusCode, 400);
+      assert.match(String((invalid.body as { error: string }).error), /Ogiltigt datum/);
+
+      const unconfigured = mockResponse();
+      await handleTaxiLogReport(request('POST', { date: '2026-11-04' }), unconfigured as never);
+      assert.equal(unconfigured.statusCode, 400);
+      assert.match(String((unconfigured.body as { error: string }).error), /EMAIL_PROVIDER=resend/);
+      assert.equal(fetchCalls, 0);
+      assert.equal(io.puts.length, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnv();
+    }
+  });
+
+  it('sends only the approved report when Resend accepts it', async () => {
     const stored = state([
       workDay({
         date: '2026-11-04',
@@ -233,27 +297,79 @@ describe('TaxiLog report route', () => {
         boltIncome: '800.00',
         bonus: '200.00',
         tips: '100.00',
+        vatAmount: '999.00',
+        incomeExVat: '999.00',
       }),
     ]);
     const io = createMemoryTaxiLogBlobIO({ privateBody: JSON.stringify(stored) });
     setTaxiLogBlobIOForTests(io);
+    const sentBodies: Array<{ to: string[]; subject: string; text: string; html: string }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      sentBodies.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200 });
+    };
+    const restoreEnv = useEmailEnv();
 
-    const empty = mockResponse();
-    await handleTaxiLogReport(request('POST', { date: '2026-09-18' }), empty as never);
-    assert.equal(empty.statusCode, 400);
-    assert.equal(io.puts.length, 0);
+    try {
+      const ok = mockResponse();
+      await handleTaxiLogReport(request('POST', { date: '2026-11-04', email: 'tobbe@example.com' }), ok as never);
+      assert.equal(ok.statusCode, 200);
+      assert.deepEqual(ok.body, { sent: true, recipient: 'report-test@example.com' });
+      assert.equal(sentBodies.length, 1);
+      assert.deepEqual(sentBodies[0]?.to, ['report-test@example.com']);
+      assert.equal(sentBodies[0]?.subject, 'TaxiLog – rapport 2026-11-04');
+      const text = sentBodies[0]?.text ?? '';
+      assert.match(text, /Egna bokningar: 1 000 kr/);
+      assert.match(text, /Hand Up: 500 kr/);
+      assert.match(text, /Uber: 1 200 kr/);
+      assert.match(text, /Bolt: 800 kr/);
+      assert.match(text, /Bonus: 200 kr/);
+      assert.match(text, /Dricks: 100 kr/);
+      assert.match(text, /Arbetade timmar: 8 h/);
+      assert.match(text, /Intäkt per arbetad timme: 437,50 kr/);
+      assert.equal(text.includes('tobbe@example.com'), false);
+      assert.equal(text.includes('999'), false);
+      assert.equal(text.includes('moms'), false);
+      assert.equal(text.includes('skatt'), false);
+      assert.equal(text.includes('sparande'), false);
+      assert.equal(text.includes('avräkning'), false);
+      assert.equal(io.puts.length, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnv();
+    }
+  });
 
-    const ok = mockResponse();
-    await handleTaxiLogReport(request('POST', { date: '2026-11-04', email: 'tobbe@example.com' }), ok as never);
-    assert.equal(ok.statusCode, 200);
-    const report = ok.body as { reportDate: string; day: { drivingGross: string; incomePerHour: string; bonus: string; tips: string } };
-    assert.equal(report.reportDate, '2026-11-04');
-    assert.equal(report.day.drivingGross, '3500.00');
-    assert.equal(report.day.bonus, '200.00');
-    assert.equal(report.day.tips, '100.00');
-    assert.equal(report.day.incomePerHour, '437.50');
-    assert.equal(JSON.stringify(ok.body).includes('tobbe@example.com'), false);
-    assert.equal(JSON.stringify(ok.body).includes('vat'), false);
-    assert.equal(io.puts.length, 0);
+  it('reports a Resend rejection and does not claim the mail was sent', async () => {
+    const stored = state([
+      workDay({
+        date: '2026-11-04',
+        workHours: '8',
+        ownBookings: '1.00',
+        handUp: '0.00',
+        uberIncome: '0.00',
+        boltIncome: '0.00',
+        bonus: '0.00',
+        tips: '0.00',
+      }),
+    ]);
+    const io = createMemoryTaxiLogBlobIO({ privateBody: JSON.stringify(stored) });
+    setTaxiLogBlobIOForTests(io);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('nope', { status: 422 });
+    const restoreEnv = useEmailEnv();
+
+    try {
+      const rejected = mockResponse();
+      await handleTaxiLogReport(request('POST', { date: '2026-11-04' }), rejected as never);
+      assert.equal(rejected.statusCode, 502);
+      assert.equal((rejected.body as { error: string }).error, 'Resend avvisade mejlet.');
+      assert.equal(JSON.stringify(rejected.body).includes('"sent":true'), false);
+      assert.equal(io.puts.length, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      restoreEnv();
+    }
   });
 });

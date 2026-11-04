@@ -81,15 +81,21 @@ export function TaxiPage() {
   }, [overview]);
 
   const sendReport = async () => {
-    if (!reportDate) return;
+    if (!reportDate || pending) return;
+    const confirmed = window.confirm(`Skicka TaxiLog-rapport för ${reportDate}?`);
+    if (!confirmed) return;
     setPending(true);
     setError('');
     setReportNotice('');
     try {
-      await taxiLogApi.report(reportDate);
-      setReportNotice(`Rapporten för ${reportDate} är skapad.`);
+      const result = await taxiLogApi.report(reportDate);
+      if (!result.sent || !result.recipient) {
+        setError('Mejlet kunde inte skickas.');
+        return;
+      }
+      setReportNotice(`Rapport skickad till ${result.recipient}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Rapporten kunde inte skapas.');
+      setError(err instanceof Error ? err.message : 'Mejlet kunde inte skickas.');
     } finally {
       setPending(false);
     }

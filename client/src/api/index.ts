@@ -163,7 +163,7 @@ export const taxiLogApi = {
     ),
   parse: (text: string) => api.post<TaxiLogParseResult>('/taxi-log/parse', { text }),
   report: (date: string) =>
-    api.post<{ reportDate: string }>('/taxi-log/report', { date }),
+    api.post<{ sent: boolean; recipient: string }>('/taxi-log/report', { date }),
   saveDay: (data: {
     date: string;
     grossIncome: string;
