@@ -1,11 +1,21 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getDay, saveDay } from '../_lib/taxi-log-store';
+import { handleTaxiLogReport } from '../_lib/taxilog/reportHandler';
 import { methodNotAllowed, readJsonBody, requireAdmin } from '../_lib/vercel-http';
+
+function queryAction(req: VercelRequest): string {
+  const raw = req.query.action;
+  return Array.isArray(raw) ? raw[0] ?? '' : String(raw ?? '');
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!requireAdmin(req, res)) return;
 
   try {
+    if (req.method === 'POST' && queryAction(req) === 'report') {
+      await handleTaxiLogReport(req, res);
+      return;
+    }
     if (req.method === 'GET') {
       res.status(200).json(await getDay(String(req.query.date ?? '')));
       return;

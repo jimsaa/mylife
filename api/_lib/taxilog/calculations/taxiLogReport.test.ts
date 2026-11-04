@@ -5,7 +5,7 @@ import { ADMIN_SESSION_COOKIE, createSessionCookieValue } from '../../temp-gate'
 import { createMemoryTaxiLogBlobIO, setTaxiLogBlobIOForTests } from '../../taxi-log-store';
 import { emptyTaxiLogState, type TaxiLogState, type TaxiWorkDayRecord } from '../service';
 import { buildTaxiLogReport } from './taxiLogReport';
-import handler from '../../../taxi-log/report';
+import { handleTaxiLogReport } from '../reportHandler';
 
 function workDay(overrides: Partial<TaxiWorkDayRecord> & Pick<TaxiWorkDayRecord, 'date'>): TaxiWorkDayRecord {
   return {
@@ -207,17 +207,17 @@ describe('TaxiLog report route', () => {
     const unauthenticated = request('POST', { date: '2026-11-01' });
     unauthenticated.headers.cookie = '';
     const denied = mockResponse();
-    await handler(unauthenticated, denied as never);
+    await handleTaxiLogReport(unauthenticated, denied as never);
     assert.equal(denied.statusCode, 401);
     assert.equal(io.puts.length, 0);
 
     const wrongMethod = mockResponse();
-    await handler(request('GET', {}), wrongMethod as never);
+    await handleTaxiLogReport(request('GET', {}), wrongMethod as never);
     assert.equal(wrongMethod.statusCode, 405);
     assert.equal(io.puts.length, 0);
 
     const foreign = mockResponse();
-    await handler(request('POST', { date: '2026-11-01' }, 'https://evil.example'), foreign as never);
+    await handleTaxiLogReport(request('POST', { date: '2026-11-01' }, 'https://evil.example'), foreign as never);
     assert.equal(foreign.statusCode, 403);
     assert.equal(io.puts.length, 0);
   });
@@ -239,12 +239,12 @@ describe('TaxiLog report route', () => {
     setTaxiLogBlobIOForTests(io);
 
     const empty = mockResponse();
-    await handler(request('POST', { date: '2026-09-18' }), empty as never);
+    await handleTaxiLogReport(request('POST', { date: '2026-09-18' }), empty as never);
     assert.equal(empty.statusCode, 400);
     assert.equal(io.puts.length, 0);
 
     const ok = mockResponse();
-    await handler(request('POST', { date: '2026-11-04', email: 'tobbe@example.com' }), ok as never);
+    await handleTaxiLogReport(request('POST', { date: '2026-11-04', email: 'tobbe@example.com' }), ok as never);
     assert.equal(ok.statusCode, 200);
     const report = ok.body as { reportDate: string; day: { drivingGross: string; incomePerHour: string; bonus: string; tips: string } };
     assert.equal(report.reportDate, '2026-11-04');

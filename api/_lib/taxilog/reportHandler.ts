@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { readTaxiLogState } from '../_lib/taxi-log-store';
-import { buildTaxiLogReport } from '../_lib/taxilog/calculations/taxiLogReport';
-import { methodNotAllowed, readJsonBody, requireAdmin } from '../_lib/vercel-http';
+import { readTaxiLogState } from '../taxi-log-store';
+import { buildTaxiLogReport } from './calculations/taxiLogReport';
+import { methodNotAllowed, readJsonBody, requireAdmin } from '../vercel-http';
 
 function headerValue(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? '';
@@ -21,7 +21,7 @@ export function isSameOriginReportRequest(req: VercelRequest): boolean {
   }
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function handleTaxiLogReport(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (!requireAdmin(req, res)) return;
   if (req.method !== 'POST') {
     methodNotAllowed(res, ['POST']);

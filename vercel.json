@@ -13,6 +13,10 @@
   },
   "rewrites": [
     {
+      "source": "/api/taxi-log/report",
+      "destination": "/api/taxi-log/day?action=report"
+    },
+    {
       "source": "/api/taxi-log/settle",
       "destination": "/api/taxi-log/month"
     },
