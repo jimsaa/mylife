@@ -193,7 +193,7 @@ function assertMonthUnlocked(state: TaxiLogState, year: number, month: number) {
   }
 }
 
-function sumKnown(values: Array<string | null>): { value: string | null; known: boolean } {
+export function sumKnown(values: Array<string | null>): { value: string | null; known: boolean } {
   const known = values.filter((value): value is string => value !== null && value !== undefined);
   if (known.length === 0) {
     return { value: null, known: false };

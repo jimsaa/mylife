@@ -37,6 +37,7 @@ export function TaxiPage() {
   const [exportText, setExportText] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [reportNotice, setReportNotice] = useState('');
   const [savingsForm, setSavingsForm] = useState({
     date: `${year}-${String(month).padStart(2, '0')}-01`,
     amount: '',
@@ -51,6 +52,7 @@ export function TaxiPage() {
       .catch((err: Error) => setError(err.message));
 
   useEffect(() => {
+    setReportNotice('');
     loadMonth();
   }, [year, month]);
 
@@ -71,6 +73,27 @@ export function TaxiPage() {
       .then((result) => setExportText(result.exportText))
       .catch(() => setExportText(null));
   }, [selectedDate]);
+
+  const reportDate = useMemo(() => {
+    const dates = overview?.days.map((day) => day.date) ?? [];
+    if (dates.length === 0) return '';
+    return dates.reduce((latest, date) => (date > latest ? date : latest));
+  }, [overview]);
+
+  const sendReport = async () => {
+    if (!reportDate) return;
+    setPending(true);
+    setError('');
+    setReportNotice('');
+    try {
+      await taxiLogApi.report(reportDate);
+      setReportNotice(`Rapporten för ${reportDate} är skapad.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Rapporten kunde inte skapas.');
+    } finally {
+      setPending(false);
+    }
+  };
 
   const chartDays = useMemo(
     () => (overview ? buildMonthChartDays(overview.year, overview.month, overview.days) : []),
@@ -109,13 +132,24 @@ export function TaxiPage() {
         title="Taxi"
         subtitle="Intäkter, lön och ackumulerat sparande"
         action={
-          <Link to="/admin/taxi/import">
-            <Button>Import</Button>
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={pending || !reportDate}
+              onClick={() => void sendReport()}
+            >
+              SKICKA RAPPORT TILL TOBBE
+            </Button>
+            <Link to="/admin/taxi/import">
+              <Button>Import</Button>
+            </Link>
+          </div>
         }
       />
 
       {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
+      {reportNotice ? <p className="mb-4 text-sm text-emerald-700">{reportNotice}</p> : null}
 
       <div className="mb-6 flex items-center justify-between">
         <button

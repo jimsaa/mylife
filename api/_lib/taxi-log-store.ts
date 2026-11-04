@@ -11,6 +11,7 @@ import {
   emptyTaxiLogState,
   loadDailyLogFromState,
   loadMonthOverviewFromState,
+  normalizeTaxiLogState,
   previewImport,
   recordManualSavingsInState,
   recordSalaryPaymentInState,
@@ -228,6 +229,12 @@ async function writeBlob(state: TaxiLogState): Promise<void> {
   const body = JSON.stringify(state);
   // The connected store is public. A private put is rejected before any write.
   await resolveBlobIO().put(body, 'public');
+}
+
+/** Read stored TaxiLog state. Does not seed and does not write. */
+export async function readTaxiLogState(): Promise<TaxiLogState> {
+  const raw = blobConfigured() ? await readBlob() : await readLocal();
+  return normalizeTaxiLogState(raw);
 }
 
 async function loadState(): Promise<TaxiLogState> {

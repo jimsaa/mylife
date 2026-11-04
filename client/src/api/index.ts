@@ -162,6 +162,8 @@ export const taxiLogApi = {
       `/taxi-log/day?date=${date}`,
     ),
   parse: (text: string) => api.post<TaxiLogParseResult>('/taxi-log/parse', { text }),
+  report: (date: string) =>
+    api.post<{ reportDate: string }>('/taxi-log/report', { date }),
   saveDay: (data: {
     date: string;
     grossIncome: string;
