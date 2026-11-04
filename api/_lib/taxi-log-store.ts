@@ -43,7 +43,7 @@ export const TAXI_LOG_BLOB_PUT_OPTIONS = {
   cacheControlMaxAge: 60,
 };
 
-/** Same pathname and overwrite rules. Used only after a public store rejects private access. */
+/** Current store is public. Same pathname and overwrite rules, with public access. */
 export const TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS = {
   ...TAXI_LOG_BLOB_PUT_OPTIONS,
   access: 'public' as const,
@@ -226,13 +226,8 @@ async function readBlob(): Promise<TaxiLogState> {
 
 async function writeBlob(state: TaxiLogState): Promise<void> {
   const body = JSON.stringify(state);
-  const io = resolveBlobIO();
-  try {
-    await io.put(body, 'private');
-  } catch (error) {
-    if (!isPublicStoreRejectingPrivateAccess(error)) throw error;
-    await io.put(body, 'public');
-  }
+  // The connected store is public. A private put is rejected before any write.
+  await resolveBlobIO().put(body, 'public');
 }
 
 async function loadState(): Promise<TaxiLogState> {

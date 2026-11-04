@@ -363,7 +363,7 @@ describe('TaxiLog private Blob store', () => {
     assert.equal(result.day?.grossIncome, '2235.00');
   });
 
-  it('saves by retrying a public put when the store rejects private access', async () => {
+  it('saves with a public put and does not send private access', async () => {
     const io = createMemoryTaxiLogBlobIO({
       privateBody: JSON.stringify(HISTORICAL_STATE),
     });
@@ -392,7 +392,7 @@ describe('TaxiLog private Blob store', () => {
       bonus: '200',
     });
 
-    assert.deepEqual(io.putAccess, ['private', 'public']);
+    assert.deepEqual(io.putAccess, ['public']);
     assert.equal(io.puts.length, 1);
     const stored = JSON.parse(io.puts[0] as string) as TaxiLogState;
     assert.equal(stored.workDays.some((day) => day.date === '2026-09-18'), true);
@@ -406,12 +406,12 @@ describe('TaxiLog private Blob store', () => {
     assert.equal(TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS.access, 'public');
     assert.equal(TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS.addRandomSuffix, false);
     assert.equal(TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS.allowOverwrite, true);
-    assert.equal(TAXI_LOG_BLOB_PUT_OPTIONS.access, 'private');
+    assert.equal(TAXI_LOG_BLOB_PATH, 'taxi-log/state.json');
     assert.equal(isPublicStoreRejectingPrivateAccess(storeError), true);
     assert.equal(isPublicStoreRejectingPrivateAccess(new Error('upstream blob failure')), false);
   });
 
-  it('does not retry a public put for an unrelated write failure', async () => {
+  it('does not follow a failed public put with another write', async () => {
     const io = createMemoryTaxiLogBlobIO({
       privateBody: JSON.stringify(HISTORICAL_STATE),
     });
@@ -436,7 +436,7 @@ describe('TaxiLog private Blob store', () => {
         }),
       /upstream blob failure/,
     );
-    assert.deepEqual(io.putAccess, ['private']);
+    assert.deepEqual(io.putAccess, ['public']);
     assert.equal(io.puts.length, 0);
   });
 
