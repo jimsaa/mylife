@@ -184,9 +184,21 @@ async function writeLocal(state: TaxiLogState): Promise<void> {
   await writeFile(LOCAL_FALLBACK, JSON.stringify(state, null, 2), 'utf8');
 }
 
+/** A still-public object rejects private GET with HTTP 400. That is not a missing store. */
+export function isPublicBlobRejectingPrivateRead(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : '';
+  return /Failed to fetch blob:\s*400\b/.test(message);
+}
+
 async function readBlob(): Promise<TaxiLogState> {
   const io = resolveBlobIO();
-  const privateText = await io.getPrivate();
+  let privateText: string | null;
+  try {
+    privateText = await io.getPrivate();
+  } catch (error) {
+    if (!isPublicBlobRejectingPrivateRead(error)) throw error;
+    privateText = null;
+  }
   if (privateText != null) return parseState(privateText);
   const publicText = await io.getPublic();
   if (publicText != null) return parseState(publicText);

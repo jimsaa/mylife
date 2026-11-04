@@ -8,6 +8,7 @@ import {
   TAXI_LOG_BLOB_PUT_OPTIONS,
   addSavings,
   createMemoryTaxiLogBlobIO,
+  isPublicBlobRejectingPrivateRead,
   getDay,
   getMonth,
   saveDay,
@@ -317,6 +318,28 @@ describe('TaxiLog private Blob store', () => {
     setTaxiLogBlobIOForTests(thrown);
     await assert.rejects(() => getDay('2026-09-18'), /upstream blob failure/);
     assert.equal(thrown.publicReads, 0);
+  });
+
+  it('reads the public object when private GET is rejected with HTTP 400', async () => {
+    const io = createMemoryTaxiLogBlobIO({
+      publicBody: JSON.stringify(HISTORICAL_STATE),
+    });
+    io.getPrivate = async () => {
+      io.privateReads += 1;
+      throw new Error('Vercel Blob: Failed to fetch blob: 400 Bad Request');
+    };
+    setTaxiLogBlobIOForTests(io);
+
+    const result = await getDay('2026-09-18');
+    assert.equal(io.privateReads, 1);
+    assert.equal(io.publicReads, 1);
+    assert.equal(io.puts.length, 0);
+    assert.equal(result.day?.grossIncome, '2235.00');
+    assert.equal(
+      isPublicBlobRejectingPrivateRead(new Error('Vercel Blob: Failed to fetch blob: 400 Bad Request')),
+      true,
+    );
+    assert.equal(isPublicBlobRejectingPrivateRead(new Error('Vercel Blob: Failed to fetch blob: 401 Unauthorized')), false);
   });
 
   it('does not seed or overwrite when list fails', async () => {
