@@ -5,10 +5,12 @@ import {
   TAXI_LOG_BLOB_GET_OPTIONS,
   TAXI_LOG_BLOB_PATH,
   TAXI_LOG_BLOB_PUBLIC_FALLBACK_GET_OPTIONS,
+  TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS,
   TAXI_LOG_BLOB_PUT_OPTIONS,
   addSavings,
   createMemoryTaxiLogBlobIO,
   isPublicBlobRejectingPrivateRead,
+  isPublicStoreRejectingPrivateAccess,
   getDay,
   getMonth,
   saveDay,
@@ -340,6 +342,102 @@ describe('TaxiLog private Blob store', () => {
       true,
     );
     assert.equal(isPublicBlobRejectingPrivateRead(new Error('Vercel Blob: Failed to fetch blob: 401 Unauthorized')), false);
+  });
+
+  it('reads the public object when the store rejects private access', async () => {
+    const io = createMemoryTaxiLogBlobIO({
+      publicBody: JSON.stringify(HISTORICAL_STATE),
+    });
+    io.getPrivate = async () => {
+      io.privateReads += 1;
+      throw new Error(
+        'Vercel Blob: Cannot use private access on a public store. The store must be configured with private access.',
+      );
+    };
+    setTaxiLogBlobIOForTests(io);
+
+    const result = await getDay('2026-09-18');
+    assert.equal(io.privateReads, 1);
+    assert.equal(io.publicReads, 1);
+    assert.equal(io.puts.length, 0);
+    assert.equal(result.day?.grossIncome, '2235.00');
+  });
+
+  it('saves by retrying a public put when the store rejects private access', async () => {
+    const io = createMemoryTaxiLogBlobIO({
+      privateBody: JSON.stringify(HISTORICAL_STATE),
+    });
+    const storeError = new Error(
+      'Vercel Blob: Cannot use private access on a public store. The store must be configured with private access.',
+    );
+    io.put = async (body: string, access: 'private' | 'public' = 'private') => {
+      io.putAccess.push(access);
+      if (access === 'private') throw storeError;
+      io.puts.push(body);
+      io.privateBody = body;
+      io.publicBody = body;
+      return io.putReturnValue;
+    };
+    setTaxiLogBlobIOForTests(io);
+
+    const saved = await saveDay({
+      date: '2026-11-03',
+      grossIncome: '3500',
+      tips: '100',
+      workedHours: '8',
+      ownBookings: '1000',
+      handUp: '500',
+      uberIncome: '1200',
+      boltIncome: '800',
+      bonus: '200',
+    });
+
+    assert.deepEqual(io.putAccess, ['private', 'public']);
+    assert.equal(io.puts.length, 1);
+    const stored = JSON.parse(io.puts[0] as string) as TaxiLogState;
+    assert.equal(stored.workDays.some((day) => day.date === '2026-09-18'), true);
+    const imported = stored.workDays.find((day) => day.date === '2026-11-03');
+    assert.equal(imported?.ownBookings, '1000');
+    assert.equal(imported?.handUp, '500');
+    assert.equal(imported?.uberIncome, '1200');
+    assert.equal(imported?.boltIncome, '800');
+    assert.equal(imported?.bonus, '200.00');
+    assert.equal(saved.day?.date, '2026-11-03');
+    assert.equal(TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS.access, 'public');
+    assert.equal(TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS.addRandomSuffix, false);
+    assert.equal(TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS.allowOverwrite, true);
+    assert.equal(TAXI_LOG_BLOB_PUT_OPTIONS.access, 'private');
+    assert.equal(isPublicStoreRejectingPrivateAccess(storeError), true);
+    assert.equal(isPublicStoreRejectingPrivateAccess(new Error('upstream blob failure')), false);
+  });
+
+  it('does not retry a public put for an unrelated write failure', async () => {
+    const io = createMemoryTaxiLogBlobIO({
+      privateBody: JSON.stringify(HISTORICAL_STATE),
+    });
+    io.put = async (_body: string, access: 'private' | 'public' = 'private') => {
+      io.putAccess.push(access);
+      throw new Error('upstream blob failure');
+    };
+    setTaxiLogBlobIOForTests(io);
+
+    await assert.rejects(
+      () =>
+        saveDay({
+          date: '2026-11-03',
+          grossIncome: '3500',
+          tips: '0',
+          workedHours: '8',
+          ownBookings: '3500',
+          handUp: '0',
+          uberIncome: '0',
+          boltIncome: '0',
+          bonus: '0',
+        }),
+      /upstream blob failure/,
+    );
+    assert.deepEqual(io.putAccess, ['private']);
+    assert.equal(io.puts.length, 0);
   });
 
   it('does not seed or overwrite when list fails', async () => {

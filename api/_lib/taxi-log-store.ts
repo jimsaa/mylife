@@ -43,12 +43,18 @@ export const TAXI_LOG_BLOB_PUT_OPTIONS = {
   cacheControlMaxAge: 60,
 };
 
+/** Same pathname and overwrite rules. Used only after a public store rejects private access. */
+export const TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS = {
+  ...TAXI_LOG_BLOB_PUT_OPTIONS,
+  access: 'public' as const,
+};
+
 const LOCAL_FALLBACK = path.join(process.cwd(), 'data', 'taxi-log-vercel.json');
 
 export type TaxiLogBlobIO = {
   getPrivate(): Promise<string | null>;
   getPublic(): Promise<string | null>;
-  put(body: string): Promise<unknown>;
+  put(body: string, access?: 'private' | 'public'): Promise<unknown>;
   listExists(): Promise<boolean>;
 };
 
@@ -60,6 +66,7 @@ export function createMemoryTaxiLogBlobIO(initial?: {
   publicReads: number;
   listCalls: number;
   puts: string[];
+  putAccess: Array<'private' | 'public'>;
   putReturnValue: { url: string; downloadUrl: string };
   listError: Error | null;
   privateBody: string | null;
@@ -70,6 +77,7 @@ export function createMemoryTaxiLogBlobIO(initial?: {
     publicReads: 0,
     listCalls: 0,
     puts: [] as string[],
+    putAccess: [] as Array<'private' | 'public'>,
     listError: null as Error | null,
     privateBody: initial?.privateBody ?? null,
     publicBody: initial?.publicBody ?? null,
@@ -85,10 +93,11 @@ export function createMemoryTaxiLogBlobIO(initial?: {
       io.publicReads += 1;
       return io.publicBody;
     },
-    async put(body: string) {
+    async put(body: string, access: 'private' | 'public' = 'private') {
       io.puts.push(body);
+      io.putAccess.push(access);
       io.privateBody = body;
-      io.publicBody = null;
+      io.publicBody = access === 'public' ? body : null;
       return io.putReturnValue;
     },
     async listExists() {
@@ -154,8 +163,12 @@ function createDefaultBlobIO(): TaxiLogBlobIO {
     async getPublic() {
       return readSdkBlobText('public');
     },
-    async put(body: string) {
-      await put(TAXI_LOG_BLOB_PATH, body, TAXI_LOG_BLOB_PUT_OPTIONS);
+    async put(body: string, access: 'private' | 'public' = 'private') {
+      await put(
+        TAXI_LOG_BLOB_PATH,
+        body,
+        access === 'public' ? TAXI_LOG_BLOB_PUBLIC_PUT_OPTIONS : TAXI_LOG_BLOB_PUT_OPTIONS,
+      );
     },
     async listExists() {
       const { blobs } = await list({ prefix: TAXI_LOG_BLOB_PATH, limit: 1 });
@@ -190,13 +203,19 @@ export function isPublicBlobRejectingPrivateRead(error: unknown): boolean {
   return /Failed to fetch blob:\s*400\b/.test(message);
 }
 
+/** Blob API rejects private put/get when the store itself is public. */
+export function isPublicStoreRejectingPrivateAccess(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : '';
+  return message.includes('Cannot use private access on a public store');
+}
+
 async function readBlob(): Promise<TaxiLogState> {
   const io = resolveBlobIO();
   let privateText: string | null;
   try {
     privateText = await io.getPrivate();
   } catch (error) {
-    if (!isPublicBlobRejectingPrivateRead(error)) throw error;
+    if (!isPublicBlobRejectingPrivateRead(error) && !isPublicStoreRejectingPrivateAccess(error)) throw error;
     privateText = null;
   }
   if (privateText != null) return parseState(privateText);
@@ -206,7 +225,14 @@ async function readBlob(): Promise<TaxiLogState> {
 }
 
 async function writeBlob(state: TaxiLogState): Promise<void> {
-  await resolveBlobIO().put(JSON.stringify(state));
+  const body = JSON.stringify(state);
+  const io = resolveBlobIO();
+  try {
+    await io.put(body, 'private');
+  } catch (error) {
+    if (!isPublicStoreRejectingPrivateAccess(error)) throw error;
+    await io.put(body, 'public');
+  }
 }
 
 async function loadState(): Promise<TaxiLogState> {
