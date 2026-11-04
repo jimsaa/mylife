@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import os from 'node:os';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -34,6 +35,16 @@ function printNetworkUrls(): void {
   console.log('');
 }
 
+function resolveBuildId(): string {
+  const vercelSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
+  if (vercelSha) return vercelSha.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short=7 HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    return 'local';
+  }
+}
+
 function networkAccessInfoPlugin(): Plugin {
   return {
     name: 'my-life-network-access-info',
@@ -47,6 +58,9 @@ function networkAccessInfoPlugin(): Plugin {
 }
 
 export default defineConfig({
+  define: {
+    __APP_BUILD_ID__: JSON.stringify(resolveBuildId()),
+  },
   plugins: [react(), networkAccessInfoPlugin()],
   server: {
     host: '0.0.0.0',
