@@ -31,6 +31,8 @@ export type TaxiShiftDraft = {
   endedAt: string | null;
   entries: TaxiShiftEntry[];
   breaks: TaxiShiftBreak[];
+  closedAt: string | null;
+  closedDate: string | null;
 };
 
 export type ReportedWorkTime = {
@@ -47,7 +49,7 @@ type KeyValueStorage = {
 const CATEGORY_IDS = new Set<string>(TAXI_SHIFT_CATEGORIES.map((category) => category.id));
 
 export function emptyTaxiShiftDraft(): TaxiShiftDraft {
-  return { version: 1, startedAt: null, endedAt: null, entries: [], breaks: [] };
+  return { version: 1, startedAt: null, endedAt: null, entries: [], breaks: [], closedAt: null, closedDate: null };
 }
 
 export function parseShiftAmount(raw: string): string | null {
@@ -204,6 +206,63 @@ export function calculateReportedWork(draft: TaxiShiftDraft, nowIso: string): Re
   };
 }
 
+export function reportedHoursValue(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0.00';
+  const minutes = Math.round(ms / 60_000);
+  const scaled = Math.round((minutes * 100) / 60);
+  const whole = Math.floor(scaled / 100);
+  const fraction = String(scaled % 100).padStart(2, '0');
+  return `${whole}.${fraction}`;
+}
+
+export type ShiftClosePlan = {
+  date: string;
+  text: string;
+  workedHours: string;
+};
+
+export function planShiftClose(
+  draft: TaxiShiftDraft,
+  nowIso: string,
+): { ok: true; plan: ShiftClosePlan } | { ok: false; reason: string } {
+  if (!draft.startedAt) return { ok: false, reason: 'Startdatum och starttid saknas.' };
+  if (!draft.endedAt) return { ok: false, reason: 'Sluttid saknas.' };
+  const work = calculateReportedWork(draft, nowIso);
+  if (work.shiftMs <= 0) return { ok: false, reason: 'Sluttiden måste vara efter starttiden.' };
+  const negative = TAXI_SHIFT_CATEGORIES.find((category) => categorySum(draft, category.id).startsWith('-'));
+  if (negative) return { ok: false, reason: `${negative.label} kan inte vara negativ när dagen sparas.` };
+  const date = instantToStockholmInput(draft.startedAt).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, reason: 'Startdatum är ogiltigt.' };
+  const workedHours = reportedHoursValue(work.reportedMs);
+  const amount = (field: string, categoryId: TaxiShiftCategoryId) => `${field}=${categorySum(draft, categoryId)}`;
+  const text = [
+    'TAXILOG_IMPORT',
+    'VERSION=3',
+    `DATE=${date}`,
+    '',
+    amount('OWN_BOOKINGS', 'ownBookings'),
+    amount('HAND_UP', 'handUp'),
+    amount('UBER_INCOME', 'uberIncome'),
+    amount('BOLT_INCOME', 'boltIncome'),
+    '',
+    amount('BONUS', 'bonus'),
+    amount('TIPS', 'tips'),
+    '',
+    `WORKED_HOURS=${workedHours}`,
+    '',
+    'END_TAXILOG_IMPORT',
+  ].join('\n');
+  return { ok: true, plan: { date, text, workedHours } };
+}
+
+export function markShiftClosed(draft: TaxiShiftDraft, closedAt: string, closedDate: string): TaxiShiftDraft {
+  return { ...draft, closedAt, closedDate };
+}
+
+export function reopenShiftForCorrection(draft: TaxiShiftDraft): TaxiShiftDraft {
+  return { ...draft, closedAt: null, closedDate: null };
+}
+
 export function formatWorkDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '0 min';
   const totalMinutes = Math.round(ms / 60_000);
@@ -316,6 +375,8 @@ function normalizeDraft(value: unknown): TaxiShiftDraft {
     endedAt: typeof record.endedAt === 'string' && record.endedAt ? record.endedAt : null,
     entries,
     breaks,
+    closedAt: typeof record.closedAt === 'string' && record.closedAt ? record.closedAt : null,
+    closedDate: typeof record.closedDate === 'string' && record.closedDate ? record.closedDate : null,
   };
 }
 

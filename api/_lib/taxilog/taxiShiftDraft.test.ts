@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { parseTaxiLogImport } from './import/taxilogImport.ts';
+import { emptyTaxiLogState, saveDailyLogToState, type TaxiPayrollRecord } from './service.ts';
 import {
   addBreak,
   addShiftEntry,
@@ -13,6 +15,10 @@ import {
   formatWorkDuration,
   instantToStockholmInput,
   loadTaxiShiftDraft,
+  markShiftClosed,
+  planShiftClose,
+  reopenShiftForCorrection,
+  reportedHoursValue,
   editShiftAmountInput,
   normalizeStockholmTime,
   parseBookingIds,
@@ -467,4 +473,203 @@ describe('TaxiLog shift draft', () => {
     assert.equal(loaded.entries[0]?.bookingIds, 'JS001, JS002');
     assert.equal(loaded.breaks.length, 1);
   });
+
+  it('plans a close only after a valid end and keeps booking ids in the draft', () => {
+    const now = '2026-11-05T16:00:00.000Z';
+    let draft = emptyTaxiShiftDraft();
+    draft = setShiftStart(draft, '2026-11-05T03:45:00.000Z');
+    assert.equal(planShiftClose(draft, now).ok, false);
+
+    draft = setShiftEnd(draft, '2026-11-05T03:00:00.000Z');
+    assert.equal(planShiftClose(draft, now).ok, false);
+
+    draft = setShiftEnd(draft, '2026-11-05T15:45:00.000Z');
+    draft = addBreak(draft, {
+      id: 'break-1',
+      startedAt: '2026-11-05T08:00:00.000Z',
+      endedAt: '2026-11-05T08:45:00.000Z',
+    });
+    draft = addShiftEntry(draft, {
+      id: 'own-1',
+      categoryId: 'ownBookings',
+      amount: '1800.00',
+      recordedAt: '2026-11-05T04:00:00.000Z',
+      bookingIds: 'JS001, JS002',
+    });
+    draft = addShiftEntry(draft, {
+      id: 'uber-1',
+      categoryId: 'uberIncome',
+      amount: '200.00',
+      recordedAt: '2026-11-05T05:00:00.000Z',
+    });
+    draft = addShiftEntry(draft, {
+      id: 'bolt-1',
+      categoryId: 'boltIncome',
+      amount: '100.00',
+      recordedAt: '2026-11-05T06:00:00.000Z',
+    });
+    draft = addShiftEntry(draft, {
+      id: 'hand-1',
+      categoryId: 'handUp',
+      amount: '50.00',
+      recordedAt: '2026-11-05T07:00:00.000Z',
+    });
+    draft = addShiftEntry(draft, {
+      id: 'tips-1',
+      categoryId: 'tips',
+      amount: '40.00',
+      recordedAt: '2026-11-05T08:00:00.000Z',
+    });
+    draft = addShiftEntry(draft, {
+      id: 'bonus-1',
+      categoryId: 'bonus',
+      amount: '10.00',
+      recordedAt: '2026-11-05T09:00:00.000Z',
+    });
+
+    const work = calculateReportedWork(draft, now);
+    assert.equal(formatWorkDuration(work.reportedMs), '11 h 15 min');
+    assert.equal(reportedHoursValue(work.reportedMs), '11.25');
+
+    const planned = planShiftClose(draft, now);
+    assert.equal(planned.ok, true);
+    if (!planned.ok) return;
+    assert.equal(planned.plan.date, '2026-11-05');
+    assert.equal(planned.plan.workedHours, '11.25');
+    assert.match(planned.plan.text, /OWN_BOOKINGS=1800\.00/);
+    assert.match(planned.plan.text, /UBER_INCOME=200\.00/);
+    assert.match(planned.plan.text, /BOLT_INCOME=100\.00/);
+    assert.match(planned.plan.text, /HAND_UP=50\.00/);
+    assert.match(planned.plan.text, /TIPS=40\.00/);
+    assert.match(planned.plan.text, /BONUS=10\.00/);
+    assert.match(planned.plan.text, /WORKED_HOURS=11\.25/);
+    assert.equal(planned.plan.text.includes('JS001'), false);
+    assert.equal(draft.closedAt, null);
+    assert.equal(draft.entries.find((entry) => entry.id === 'own-1')?.bookingIds, 'JS001, JS002');
+
+    const parsed = parseTaxiLogImport(planned.plan.text);
+    assert.equal(parsed.version, '3');
+    assert.equal(parsed.date, '2026-11-05');
+    assert.equal(parsed.ownBookings, '1800');
+    assert.equal(parsed.uberIncome, '200');
+    assert.equal(parsed.boltIncome, '100');
+    assert.equal(parsed.handUp, '50');
+    assert.equal(parsed.tips, '40');
+    assert.equal(parsed.bonus, '10');
+    assert.equal(parsed.workedHours, '11.25');
+    assert.equal(parsed.grossIncome, '2150');
+
+    const saved = saveDailyLogToState(emptyTaxiLogState(), {
+      date: parsed.date,
+      grossIncome: parsed.grossIncome,
+      tips: parsed.tips,
+      workedHours: parsed.workedHours,
+      ownBookings: parsed.ownBookings,
+      otherIncome: parsed.otherIncome,
+      handUp: parsed.handUp,
+      uberIncome: parsed.uberIncome,
+      boltIncome: parsed.boltIncome,
+      bonus: parsed.bonus,
+    });
+    assert.equal(saved.workDays.length, 1);
+    assert.equal(saved.workDays[0]?.workHours, '11.25');
+    assert.equal(saved.workDays[0]?.ownBookings, '1800');
+
+    const replaced = saveDailyLogToState(saved, {
+      date: parsed.date,
+      grossIncome: parsed.grossIncome,
+      tips: '5',
+      workedHours: parsed.workedHours,
+      ownBookings: parsed.ownBookings,
+      handUp: parsed.handUp,
+      uberIncome: parsed.uberIncome,
+      boltIncome: parsed.boltIncome,
+      bonus: parsed.bonus,
+    });
+    assert.equal(replaced.workDays.length, 1);
+    assert.equal(replaced.workDays[0]?.tips, '5.00');
+
+    const locked = emptyTaxiLogState();
+    locked.payrolls = [lockedPayroll()];
+    assert.throws(
+      () =>
+        saveDailyLogToState(locked, {
+          date: parsed.date,
+          grossIncome: parsed.grossIncome,
+          tips: parsed.tips,
+          workedHours: parsed.workedHours,
+          ownBookings: parsed.ownBookings,
+          handUp: parsed.handUp,
+          uberIncome: parsed.uberIncome,
+          boltIncome: parsed.boltIncome,
+          bonus: parsed.bonus,
+        }),
+      /Månaden är låst/,
+    );
+    assert.equal(locked.workDays.length, 0);
+
+    const negative = addShiftEntry(draft, {
+      id: 'uber-neg',
+      categoryId: 'uberIncome',
+      amount: '-300.00',
+      recordedAt: '2026-11-05T10:00:00.000Z',
+    });
+    const blocked = planShiftClose(negative, now);
+    assert.equal(blocked.ok, false);
+    assert.equal(negative.entries.length, draft.entries.length + 1);
+
+    const cleared = setShiftEnd(draft, null);
+    assert.equal(planShiftClose(cleared, now).ok, false);
+    assert.equal(cleared.entries.find((entry) => entry.id === 'own-1')?.bookingIds, 'JS001, JS002');
+
+    const closed = markShiftClosed(draft, '2026-11-05T16:05:00.000Z', planned.plan.date);
+    assert.equal(closed.closedDate, '2026-11-05');
+    assert.equal(closed.entries.find((entry) => entry.id === 'own-1')?.bookingIds, 'JS001, JS002');
+    const reopened = reopenShiftForCorrection(closed);
+    assert.equal(reopened.closedAt, null);
+    assert.equal(reopened.entries.length, closed.entries.length);
+
+    const legacy = loadTaxiShiftDraft(
+      memoryStorage(JSON.stringify({ version: 1, startedAt: draft.startedAt, endedAt: draft.endedAt, entries: [], breaks: [] })),
+    );
+    assert.equal(legacy.closedAt, null);
+    const stored = memoryStorage();
+    saveTaxiShiftDraft(stored, closed);
+    assert.equal(loadTaxiShiftDraft(stored).closedAt, closed.closedAt);
+    assert.equal(loadTaxiShiftDraft(stored).entries[0]?.bookingIds, 'JS001, JS002');
+
+    const versionOne = parseTaxiLogImport(`TAXILOG_IMPORT
+VERSION=1
+DATE=2026-11-01
+GROSS_INCOME=100
+TIPS=0
+WORKED_HOURS=1
+END_TAXILOG_IMPORT`);
+    assert.equal(versionOne.version, '1');
+    assert.equal(versionOne.grossIncome, '100');
+  });
 });
+
+function lockedPayroll(): TaxiPayrollRecord {
+  return {
+    year: 2026,
+    month: 11,
+    periodStart: '2026-11-01',
+    periodEnd: '2026-11-30',
+    totalWorkDays: 0,
+    totalWorkHours: '0',
+    totalIncome: '0.00',
+    totalTips: '0.00',
+    vatRate: '0.06',
+    totalVat: '0.00',
+    totalIncomeExVat: '0.00',
+    totalCosts: '0.00',
+    accruedSalary: '0.00',
+    salaryStatus: 'open',
+    paymentDate: null,
+    paidAmount: '0.00',
+    remainingAmount: '0.00',
+    settlementLocked: true,
+    settlementLockedAt: '2026-11-30T00:00:00.000Z',
+  };
+}

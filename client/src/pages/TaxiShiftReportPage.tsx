@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { taxiLogApi } from '../api';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { formatSek } from '../lib/taxilogDisplay';
@@ -16,13 +17,16 @@ import {
   hasOpenBreak,
   instantToStockholmInput,
   loadTaxiShiftDraft,
+  markShiftClosed,
   normalizeStockholmDate,
   normalizeStockholmTime,
   stockholmFieldsToInstant,
   parseBookingIds,
   parseShiftAmount,
+  planShiftClose,
   removeBreak,
   removeShiftEntry,
+  reopenShiftForCorrection,
   resumeBreak,
   saveTaxiShiftDraft,
   setShiftEnd,
@@ -33,6 +37,7 @@ import {
   updateBreak,
   updateShiftEntry,
   type ShiftAmountKey,
+  type ShiftClosePlan,
   type TaxiShiftCategoryId,
   type TaxiShiftDraft,
   type TaxiShiftEntry,
@@ -107,6 +112,14 @@ export function TaxiShiftReportPage() {
   const [amountError, setAmountError] = useState('');
   const [timeParts, setTimeParts] = useState<Record<string, { date: string; time: string }>>({});
   const [now, setNow] = useState(() => new Date().toISOString());
+  const [closePlan, setClosePlan] = useState<ShiftClosePlan | null>(null);
+  const [closeNotice, setCloseNotice] = useState<string | null>(null);
+  const [closeBlocked, setCloseBlocked] = useState(false);
+  const [closeReady, setCloseReady] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const closeToken = useRef(0);
 
   useEffect(() => {
     setDraft(loadTaxiShiftDraft(window.localStorage));
@@ -129,10 +142,13 @@ export function TaxiShiftReportPage() {
 
   const started = draft.startedAt != null;
   const ended = draft.endedAt != null;
+  const sealed = draft.closedAt != null;
   const breakOpen = started && !ended && hasOpenBreak(draft);
   const work = calculateReportedWork(draft, now);
+  const canClose = started && ended && work.shiftMs > 0;
 
   const openEditor = (next: EditorState, currentAmount = '', bookingIds = '') => {
+    if (draft.closedAt) return;
     setEditor(next);
     setAmountInput(currentAmount);
     setBookingIdInput(bookingIds);
@@ -147,6 +163,7 @@ export function TaxiShiftReportPage() {
   };
 
   const saveAmount = () => {
+    if (draft.closedAt) return;
     const amount = parseShiftAmount(amountInput.replace(/,$/, ''));
     if (!amount || !editor) {
       setAmountError('Ange ett belopp, till exempel 150 eller -20.');
@@ -180,6 +197,99 @@ export function TaxiShiftReportPage() {
       )
     : undefined;
 
+  const cancelClose = () => {
+    if (closingRef.current) return;
+    closeToken.current += 1;
+    setClosePlan(null);
+    setCloseNotice(null);
+    setCloseBlocked(false);
+    setCloseError(null);
+  };
+
+  const openClose = () => {
+    if (draft.closedAt) return;
+    const planned = planShiftClose(draft, new Date().toISOString());
+    if (!planned.ok) {
+      setCloseError(planned.reason);
+      setClosePlan(null);
+      return;
+    }
+    setCloseError(null);
+    setCloseNotice(null);
+    setCloseBlocked(false);
+    setCloseReady(false);
+    setClosePlan(planned.plan);
+    const token = ++closeToken.current;
+    const [year, month] = planned.plan.date.split('-').map(Number);
+    void Promise.all([taxiLogApi.day(planned.plan.date), taxiLogApi.month(year, month)])
+      .then(([existing, overview]) => {
+        if (closeToken.current !== token) return;
+        if (overview.settlementLocked) {
+          setCloseBlocked(true);
+          setCloseNotice('Månaden är låst. Lås upp med en uttrycklig korrigering innan du ändrar.');
+          return;
+        }
+        const day = existing.day;
+        const registered = Boolean(
+          day &&
+            (day.sourceCategorized ||
+              day.ownBookings != null ||
+              day.handUp != null ||
+              day.uberIncome != null ||
+              day.boltIncome != null ||
+              day.bonus != null ||
+              Number(day.grossIncome) > 0 ||
+              Number(day.workedHours) > 0 ||
+              Number(day.tips) > 0),
+        );
+        setCloseNotice(
+          registered ? `Datumet ${planned.plan.date} är redan registrerat. Sparning ersätter den dagen.` : null,
+        );
+        setCloseReady(true);
+      })
+      .catch(() => {
+        if (closeToken.current !== token) return;
+        setCloseReady(true);
+      });
+  };
+
+  const confirmClose = async () => {
+    if (!closePlan || !closeReady || closingRef.current || draft.closedAt || closeBlocked) return;
+    closingRef.current = true;
+    setClosing(true);
+    setCloseError(null);
+    const plan = closePlan;
+    const source = draft;
+    try {
+      const parsed = await taxiLogApi.parse(plan.text);
+      if (parsed.parsed.date !== plan.date) {
+        throw new Error('Importen fick ett annat datum. Ingenting sparades.');
+      }
+      await taxiLogApi.saveDay({
+        date: parsed.parsed.date,
+        grossIncome: parsed.parsed.grossIncome,
+        tips: parsed.parsed.tips,
+        workedHours: parsed.parsed.workedHours,
+        ownBookings: parsed.parsed.ownBookings,
+        otherIncome: parsed.parsed.otherIncome,
+        handUp: parsed.parsed.handUp,
+        uberIncome: parsed.parsed.uberIncome,
+        boltIncome: parsed.parsed.boltIncome,
+        bonus: parsed.parsed.bonus,
+      });
+      setDraft(markShiftClosed(source, new Date().toISOString(), parsed.parsed.date));
+      closeToken.current += 1;
+      setClosePlan(null);
+      setCloseNotice(null);
+      setCloseBlocked(false);
+    } catch (error) {
+      setCloseError(error instanceof Error ? error.message : 'Dagen kunde inte sparas.');
+    } finally {
+      closingRef.current = false;
+      setClosing(false);
+    }
+  };
+
   const commitTime = (
     id: string,
     iso: string | null,
@@ -187,6 +297,7 @@ export function TaxiShiftReportPage() {
     allowEmpty: boolean,
     apply: (next: string | null) => void,
   ) => {
+    if (draft.closedAt) return;
     const base = timeParts[id] ?? splitStockholm(iso);
     const next = {
       date: patch.date !== undefined ? normalizeStockholmDate(patch.date) : base.date,
@@ -217,7 +328,11 @@ export function TaxiShiftReportPage() {
     <div className="mx-auto w-full min-w-0 max-w-5xl" lang="sv-SE">
       <header className="mb-1">
         <h1 className="text-xl font-bold leading-tight text-text">Passrapport</h1>
-        <p className="text-xs text-text-muted">Ingenting sparas till dagen förrän ett senare steg.</p>
+        <p className="text-xs text-text-muted">
+          {sealed
+            ? `Dagen ${draft.closedDate ?? ''} är sparad. Inget mejl skickas.`
+            : 'Dagen sparas först när du bekräftar STÄNG DAG. Inget mejl skickas.'}
+        </p>
       </header>
 
       <div className="space-y-2">
@@ -236,6 +351,7 @@ export function TaxiShiftReportPage() {
                   <Button
                     type="button"
                     className="mt-1 min-h-11 w-full px-2 text-sm"
+                    disabled={sealed}
                     onClick={() => openEditor({ mode: 'add', categoryId: category.id })}
                   >
                     PLUS
@@ -246,7 +362,8 @@ export function TaxiShiftReportPage() {
                         <li key={entry.id}>
                           <button
                             type="button"
-                            className="min-h-11 w-full text-left"
+                            className="min-h-11 w-full text-left disabled:opacity-60"
+                            disabled={sealed}
                             onClick={() =>
                               openEditor(
                                 { mode: 'edit', entry },
@@ -267,6 +384,7 @@ export function TaxiShiftReportPage() {
                               type="button"
                               variant="secondary"
                               className="min-h-11 px-1 text-xs"
+                              disabled={sealed}
                               aria-label={`Ändra ${formatSek(entry.amount)}`}
                               onClick={() =>
                                 openEditor(
@@ -282,7 +400,9 @@ export function TaxiShiftReportPage() {
                               type="button"
                               variant="ghost"
                               className="min-h-11 px-1 text-xs"
+                              disabled={sealed}
                               onClick={() => {
+                                if (sealed) return;
                                 if (!window.confirm(`Ta bort ${formatSek(entry.amount)} från ${category.label}?`)) return;
                                 setDraft((current) => (current ? removeShiftEntry(current, entry.id) : current));
                               }}
@@ -299,7 +419,24 @@ export function TaxiShiftReportPage() {
             })}
           </section>
 
-          {!started ? (
+          {sealed ? (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-text" role="status">
+                Dagen {draft.closedDate} är sparad.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-14 w-full text-base"
+                onClick={() => {
+                  if (!window.confirm('Öppna dagen för korrigering? Den sparade dagen ligger kvar tills du stänger och sparar igen.')) return;
+                  setDraft((current) => (current ? reopenShiftForCorrection(current) : current));
+                }}
+              >
+                Korrigera dagen
+              </Button>
+            </div>
+          ) : !started ? (
             <Button
               type="button"
               className="min-h-14 w-full text-base"
@@ -367,9 +504,23 @@ export function TaxiShiftReportPage() {
                 PASS SLUT
               </Button>
             </div>
+          ) : canClose ? (
+            <div className="space-y-1">
+              <Button type="button" className="min-h-14 w-full text-base" onClick={openClose}>
+                STÄNG DAG
+              </Button>
+              {closeError && !closePlan ? (
+                <p className="text-sm text-red-600" role="alert">
+                  {closeError}
+                </p>
+              ) : null}
+              <p className="text-xs leading-snug text-text-muted">
+                Passet är avslutat. Ingenting sparas och inget mejl skickas förrän du bekräftar.
+              </p>
+            </div>
           ) : (
-            <p className="text-xs leading-snug text-text-muted">
-              Passet har en sluttid. Tider, raster och poster kan fortfarande ändras. Dagen stängs inte och inget mejl skickas.
+            <p className="text-sm text-red-600" role="alert">
+              STÄNG DAG visas när sluttiden är efter starttiden.
             </p>
           )}
 
@@ -399,6 +550,7 @@ export function TaxiShiftReportPage() {
                     <input
                       id="shift-start-date"
                       type="date"
+                      disabled={sealed}
                       className={timeFieldClass}
                       value={timeValue('shift-start', draft.startedAt).date}
                       onChange={(event) =>
@@ -415,6 +567,7 @@ export function TaxiShiftReportPage() {
                       id="shift-start-time"
                       type="time"
                       step={60}
+                      disabled={sealed}
                       className={timeFieldClass}
                       value={timeValue('shift-start', draft.startedAt).time}
                       onChange={(event) =>
@@ -435,6 +588,7 @@ export function TaxiShiftReportPage() {
                     <input
                       id="shift-end-date"
                       type="date"
+                      disabled={sealed}
                       className={timeFieldClass}
                       value={timeValue('shift-end', draft.endedAt).date}
                       onChange={(event) =>
@@ -450,6 +604,7 @@ export function TaxiShiftReportPage() {
                       id="shift-end-time"
                       type="time"
                       step={60}
+                      disabled={sealed}
                       className={timeFieldClass}
                       value={timeValue('shift-end', draft.endedAt).time}
                       onChange={(event) =>
@@ -514,7 +669,9 @@ export function TaxiShiftReportPage() {
                       type="button"
                       variant="ghost"
                       className="min-h-11 shrink-0 px-2 text-xs"
+                      disabled={sealed}
                       onClick={() => {
+                        if (sealed) return;
                         if (!window.confirm(`Ta bort rast ${index + 1}?`)) return;
                         setDraft((current) => (current ? removeBreak(current, item.id) : current));
                       }}
@@ -530,6 +687,7 @@ export function TaxiShiftReportPage() {
                         <input
                           id={`${startId}-date`}
                           type="date"
+                          disabled={sealed}
                           className={timeFieldClass}
                           value={startParts.date}
                           onChange={(event) =>
@@ -547,6 +705,7 @@ export function TaxiShiftReportPage() {
                         <input
                           id={`${startId}-time`}
                           type="time"
+                          disabled={sealed}
                           className={timeFieldClass}
                           value={startParts.time}
                           onChange={(event) =>
@@ -567,6 +726,7 @@ export function TaxiShiftReportPage() {
                         <input
                           id={`${endId}-date`}
                           type="date"
+                          disabled={sealed}
                           className={timeFieldClass}
                           value={endParts.date}
                           onChange={(event) =>
@@ -583,6 +743,7 @@ export function TaxiShiftReportPage() {
                         <input
                           id={`${endId}-time`}
                           type="time"
+                          disabled={sealed}
                           className={timeFieldClass}
                           value={endParts.time}
                           onChange={(event) =>
@@ -603,7 +764,9 @@ export function TaxiShiftReportPage() {
               type="button"
               variant="secondary"
               className="mt-2 min-h-11 w-full text-sm sm:w-auto"
+              disabled={sealed}
               onClick={() => {
+                if (sealed) return;
                 const stamp = draft.endedAt ?? draft.startedAt ?? new Date().toISOString();
                 setDraft((current) =>
                   current
@@ -616,6 +779,114 @@ export function TaxiShiftReportPage() {
             </Button>
           </section>
       </div>
+
+      {closePlan ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+          role="presentation"
+          onClick={cancelClose}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="shift-close-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Card title="Stäng dag">
+              <h2 id="shift-close-title" className="sr-only">
+                Sammanställning innan dagen sparas
+              </h2>
+              <dl className="space-y-1 text-sm text-text">
+                <div className="flex justify-between gap-3">
+                  <dt>Datum</dt>
+                  <dd className="font-semibold tabular-nums">{closePlan.date}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Starttid</dt>
+                  <dd className="text-right font-semibold tabular-nums">
+                    {draft.startedAt ? formatInstant(draft.startedAt) : ''}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Sluttid</dt>
+                  <dd className="text-right font-semibold tabular-nums">
+                    {draft.endedAt ? formatInstant(draft.endedAt) : ''}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Passtid</dt>
+                  <dd className="font-semibold tabular-nums">{formatWorkDuration(work.shiftMs)}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Sammanlagd rasttid</dt>
+                  <dd className="font-semibold tabular-nums">{formatWorkDuration(work.breakMs)}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Rapporterad arbetstid</dt>
+                  <dd className="font-semibold tabular-nums">{formatWorkDuration(work.reportedMs)}</dd>
+                </div>
+                {TAXI_SHIFT_CATEGORIES.map((category) => (
+                  <div key={category.id} className="flex justify-between gap-3">
+                    <dt>{category.label}</dt>
+                    <dd className="font-semibold tabular-nums">{formatSek(categorySum(draft, category.id))}</dd>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-3 border-t border-border pt-1">
+                  <dt>Total kassa</dt>
+                  <dd className="font-semibold tabular-nums">{formatSek(cashTotal(draft))}</dd>
+                </div>
+              </dl>
+              <div className="mt-2 space-y-1">
+                <p className="text-xs font-medium text-text">Egen Kund</p>
+                {draft.entries.filter((entry) => entry.categoryId === 'ownBookings').length === 0 ? (
+                  <p className="text-xs text-text-muted">Ingen post.</p>
+                ) : (
+                  draft.entries
+                    .filter((entry) => entry.categoryId === 'ownBookings')
+                    .map((entry) => (
+                      <p key={entry.id} className="text-sm text-text">
+                        {ownBookingLine(entry.amount, entry.bookingIds)}
+                      </p>
+                    ))
+                )}
+                <p className="text-xs text-text-muted">
+                  Boknings-ID sparas i utkastet. TaxiLog-dagen har inget fält för dem.
+                </p>
+              </div>
+              {closeNotice ? (
+                <p className="mt-2 text-sm text-text" role="status">
+                  {closeNotice}
+                </p>
+              ) : null}
+              {closeError ? (
+                <p className="mt-2 text-sm text-red-600" role="alert">
+                  {closeError}
+                </p>
+              ) : null}
+              <div className="mt-3 grid gap-2">
+                <Button
+                  type="button"
+                  className="min-h-14 w-full text-base"
+                  disabled={closing || closeBlocked || !closeReady}
+                  onClick={() => void confirmClose()}
+                >
+                  STÄNG OCH SPARA DAG
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="min-h-14 w-full text-base"
+                  disabled={closing}
+                  onClick={cancelClose}
+                >
+                  Avbryt
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </div>
+      ) : null}
 
       {editor && editorCategory ? (
         <div
