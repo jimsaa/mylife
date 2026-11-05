@@ -16,6 +16,9 @@ import {
   hasOpenBreak,
   instantToStockholmInput,
   loadTaxiShiftDraft,
+  normalizeStockholmDate,
+  normalizeStockholmTime,
+  stockholmFieldsToInstant,
   parseBookingIds,
   parseShiftAmount,
   removeBreak,
@@ -26,7 +29,6 @@ import {
   setShiftStart,
   startBreak,
   startShift,
-  stockholmInputToInstant,
   TAXI_SHIFT_CATEGORIES,
   updateBreak,
   updateShiftEntry,
@@ -89,7 +91,7 @@ function amountKeyLabel(key: AmountPadKey): string {
 }
 
 const timeFieldClass =
-  'mt-0.5 block w-full min-w-0 max-w-full min-h-11 rounded-lg border border-border bg-surface px-2 py-1 text-base tabular-nums text-text outline-none focus:border-accent focus:ring-1 focus:ring-accent';
+  'mt-0.5 block w-full min-w-0 max-w-full min-h-12 rounded-lg border border-border bg-surface px-2 py-1 text-base tabular-nums text-text outline-none focus:border-accent focus:ring-1 focus:ring-accent';
 
 function splitStockholm(iso: string | null): { date: string; time: string } {
   if (!iso) return { date: '', time: '' };
@@ -186,13 +188,16 @@ export function TaxiShiftReportPage() {
     apply: (next: string | null) => void,
   ) => {
     const base = timeParts[id] ?? splitStockholm(iso);
-    const next = { date: patch.date ?? base.date, time: patch.time ?? base.time };
+    const next = {
+      date: patch.date !== undefined ? normalizeStockholmDate(patch.date) : base.date,
+      time: patch.time !== undefined ? normalizeStockholmTime(patch.time) : base.time,
+    };
     if (!next.date || !next.time) {
       setTimeParts((current) => ({ ...current, [id]: next }));
-      if (allowEmpty && iso) apply(null);
+      if (allowEmpty && iso && !next.date && !next.time) apply(null);
       return;
     }
-    const instant = stockholmInputToInstant(`${next.date}T${next.time}`);
+    const instant = stockholmFieldsToInstant(next.date, next.time);
     if (!instant) {
       setTimeParts((current) => ({ ...current, [id]: next }));
       return;
@@ -215,16 +220,7 @@ export function TaxiShiftReportPage() {
         <p className="text-xs text-text-muted">Ingenting sparas till dagen förrän ett senare steg.</p>
       </header>
 
-      {!started ? (
-        <Button
-          type="button"
-          className="min-h-12 w-full text-base"
-          onClick={() => setDraft((current) => (current ? startShift(current, new Date().toISOString()) : current))}
-        >
-          STARTA PASS
-        </Button>
-      ) : (
-        <div className="space-y-2">
+      <div className="space-y-2">
           <section className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
             {TAXI_SHIFT_CATEGORIES.map((category) => {
               const entries = draft.entries.filter((entry) => entry.categoryId === category.id);
@@ -303,7 +299,25 @@ export function TaxiShiftReportPage() {
             })}
           </section>
 
-          {!ended ? (
+          {!started ? (
+            <Button
+              type="button"
+              className="min-h-14 w-full text-base"
+              onClick={() => {
+                const startedAt = new Date().toISOString();
+                setNow(startedAt);
+                setTimeParts((current) => {
+                  if (!('shift-start' in current)) return current;
+                  const copy = { ...current };
+                  delete copy['shift-start'];
+                  return copy;
+                });
+                setDraft((current) => (current ? startShift(current, startedAt) : current));
+              }}
+            >
+              STARTA PASS
+            </Button>
+          ) : !ended ? (
             <div className="grid grid-cols-2 gap-1.5">
               {!breakOpen ? (
                 <Button
@@ -339,7 +353,15 @@ export function TaxiShiftReportPage() {
                 className="min-h-14 w-full px-2 text-base"
                 onClick={() => {
                   if (!window.confirm('Avsluta passet nu? Ingenting sparas till dagen.')) return;
-                  setDraft((current) => (current ? endShift(current, new Date().toISOString()) : current));
+                  const endedAt = new Date().toISOString();
+                  setNow(endedAt);
+                  setTimeParts((current) => {
+                    if (!('shift-end' in current)) return current;
+                    const copy = { ...current };
+                    delete copy['shift-end'];
+                    return copy;
+                  });
+                  setDraft((current) => (current ? endShift(current, endedAt) : current));
                 }}
               >
                 PASS SLUT
@@ -370,17 +392,17 @@ export function TaxiShiftReportPage() {
           <section className="rounded-xl border border-border bg-surface p-2.5 shadow-sm">
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="min-w-0">
-                <p className="text-xs font-medium text-text">Start</p>
+                <p className="text-sm font-medium text-text">Start</p>
                 <div className="grid grid-cols-2 gap-1.5">
                   <label className="min-w-0 text-xs text-text-muted" htmlFor="shift-start-date">
-                    Datum
+                    Startdatum
                     <input
                       id="shift-start-date"
                       type="date"
                       className={timeFieldClass}
                       value={timeValue('shift-start', draft.startedAt).date}
                       onChange={(event) =>
-                        commitTime('shift-start', draft.startedAt, { date: event.target.value }, false, (instant) => {
+                        commitTime('shift-start', draft.startedAt, { date: event.currentTarget.value }, false, (instant) => {
                           if (!instant) return;
                           setDraft((current) => (current ? setShiftStart(current, instant) : current));
                         })
@@ -388,14 +410,15 @@ export function TaxiShiftReportPage() {
                     />
                   </label>
                   <label className="min-w-0 text-xs text-text-muted" htmlFor="shift-start-time">
-                    Tid
+                    Starttid
                     <input
                       id="shift-start-time"
                       type="time"
+                      step={60}
                       className={timeFieldClass}
                       value={timeValue('shift-start', draft.startedAt).time}
                       onChange={(event) =>
-                        commitTime('shift-start', draft.startedAt, { time: event.target.value }, false, (instant) => {
+                        commitTime('shift-start', draft.startedAt, { time: event.currentTarget.value }, false, (instant) => {
                           if (!instant) return;
                           setDraft((current) => (current ? setShiftStart(current, instant) : current));
                         })
@@ -405,31 +428,32 @@ export function TaxiShiftReportPage() {
                 </div>
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-medium text-text">Slut</p>
+                <p className="text-sm font-medium text-text">Slut</p>
                 <div className="grid grid-cols-2 gap-1.5">
                   <label className="min-w-0 text-xs text-text-muted" htmlFor="shift-end-date">
-                    Datum
+                    Slutdatum
                     <input
                       id="shift-end-date"
                       type="date"
                       className={timeFieldClass}
                       value={timeValue('shift-end', draft.endedAt).date}
                       onChange={(event) =>
-                        commitTime('shift-end', draft.endedAt, { date: event.target.value }, true, (instant) => {
+                        commitTime('shift-end', draft.endedAt, { date: event.currentTarget.value }, true, (instant) => {
                           setDraft((current) => (current ? setShiftEnd(current, instant) : current));
                         })
                       }
                     />
                   </label>
                   <label className="min-w-0 text-xs text-text-muted" htmlFor="shift-end-time">
-                    Tid
+                    Sluttid
                     <input
                       id="shift-end-time"
                       type="time"
+                      step={60}
                       className={timeFieldClass}
                       value={timeValue('shift-end', draft.endedAt).time}
                       onChange={(event) =>
-                        commitTime('shift-end', draft.endedAt, { time: event.target.value }, true, (instant) => {
+                        commitTime('shift-end', draft.endedAt, { time: event.currentTarget.value }, true, (instant) => {
                           setDraft((current) => (current ? setShiftEnd(current, instant) : current));
                         })
                       }
@@ -438,6 +462,11 @@ export function TaxiShiftReportPage() {
                 </div>
               </div>
             </div>
+            {started && ended && work.shiftMs === 0 ? (
+              <p className="mt-2 text-sm text-red-600" role="alert">
+                Sluttiden måste vara efter starttiden. Rapporterad arbetstid är 0 min tills intervallet är giltigt.
+              </p>
+            ) : null}
 
             <div className="mt-2 grid grid-cols-3 gap-1.5">
               {(
@@ -586,9 +615,7 @@ export function TaxiShiftReportPage() {
               Lägg till rast
             </Button>
           </section>
-        </div>
-      )}
-
+      </div>
 
       {editor && editorCategory ? (
         <div

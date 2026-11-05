@@ -128,7 +128,7 @@ export function categorySharePercent(draft: TaxiShiftDraft, categoryId: TaxiShif
 
 export function startShift(draft: TaxiShiftDraft, startedAt: string): TaxiShiftDraft {
   if (draft.startedAt) return draft;
-  return { ...draft, startedAt, endedAt: null };
+  return { ...draft, startedAt };
 }
 
 export function setShiftStart(draft: TaxiShiftDraft, startedAt: string): TaxiShiftDraft {
@@ -221,8 +221,25 @@ export function instantToStockholmInput(iso: string): string {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
+export function normalizeStockholmDate(value: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+  return match?.[1] ?? '';
+}
+
+export function normalizeStockholmTime(value: string): string {
+  const match = /^(\d{2}):(\d{2})/.exec(value.trim());
+  return match ? `${match[1]}:${match[2]}` : '';
+}
+
+export function stockholmFieldsToInstant(date: string, time: string): string | null {
+  const day = normalizeStockholmDate(date);
+  const clock = normalizeStockholmTime(time);
+  if (!day || !clock) return null;
+  return stockholmInputToInstant(`${day}T${clock}`);
+}
+
 export function stockholmInputToInstant(value: string): string | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/.exec(value);
   if (!match) return null;
   const year = Number(match[1]);
   const month = Number(match[2]);

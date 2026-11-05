@@ -14,8 +14,10 @@ import {
   instantToStockholmInput,
   loadTaxiShiftDraft,
   editShiftAmountInput,
+  normalizeStockholmTime,
   parseBookingIds,
   parseShiftAmount,
+  stockholmFieldsToInstant,
   removeBreak,
   removeShiftEntry,
   resumeBreak,
@@ -409,5 +411,60 @@ describe('TaxiLog shift draft', () => {
     assert.equal(draft.entries.some((entry) => entry.id === 'own-1'), false);
     saveTaxiShiftDraft(storage, draft);
     assert.equal(loadTaxiShiftDraft(storage).entries.some((entry) => entry.bookingIds), false);
+  });
+
+  it('keeps the same draft when start and end are set, corrected, and cross midnight', () => {
+    assert.equal(normalizeStockholmTime('22:15:00'), '22:15');
+    assert.equal(
+      stockholmFieldsToInstant('2026-11-05', '22:00:00'),
+      stockholmInputToInstant('2026-11-05T22:00'),
+    );
+
+    let draft = addShiftEntry(emptyTaxiShiftDraft(), {
+      id: 'own-1',
+      categoryId: 'ownBookings',
+      amount: '1800.00',
+      recordedAt: '2026-11-05T21:00:00.000Z',
+      bookingIds: 'JS001, JS002',
+    });
+    draft = addBreak(draft, {
+      id: 'night',
+      startedAt: '2026-11-05T22:00:00.000Z',
+      endedAt: '2026-11-05T22:30:00.000Z',
+    });
+    draft = setShiftEnd(draft, '2026-11-06T05:00:00.000Z');
+    draft = startShift(draft, '2026-11-05T20:00:00.000Z');
+    assert.equal(draft.startedAt, '2026-11-05T20:00:00.000Z');
+    assert.equal(draft.endedAt, '2026-11-06T05:00:00.000Z');
+
+    let work = calculateReportedWork(draft, '2026-11-06T12:00:00.000Z');
+    assert.equal(formatWorkDuration(work.shiftMs), '9 h');
+    assert.equal(formatWorkDuration(work.breakMs), '30 min');
+    assert.equal(formatWorkDuration(work.reportedMs), '8 h 30 min');
+
+    draft = setShiftStart(draft, '2026-11-05T21:00:00.000Z');
+    draft = setShiftEnd(draft, '2026-11-06T04:00:00.000Z');
+    work = calculateReportedWork(draft, '2026-11-06T12:00:00.000Z');
+    assert.equal(formatWorkDuration(work.shiftMs), '7 h');
+    assert.equal(formatWorkDuration(work.reportedMs), '6 h 30 min');
+    assert.equal(draft.entries[0]?.amount, '1800.00');
+    assert.equal(draft.entries[0]?.bookingIds, 'JS001, JS002');
+    assert.equal(draft.breaks[0]?.startedAt, '2026-11-05T22:00:00.000Z');
+    assert.equal(draft.breaks[0]?.endedAt, '2026-11-05T22:30:00.000Z');
+
+    const invalid = calculateReportedWork(
+      setShiftEnd(draft, '2026-11-05T18:00:00.000Z'),
+      '2026-11-06T12:00:00.000Z',
+    );
+    assert.equal(invalid.shiftMs, 0);
+    assert.equal(invalid.reportedMs, 0);
+
+    const storage = memoryStorage();
+    saveTaxiShiftDraft(storage, draft);
+    const loaded = loadTaxiShiftDraft(storage);
+    assert.equal(loaded.startedAt, draft.startedAt);
+    assert.equal(loaded.endedAt, draft.endedAt);
+    assert.equal(loaded.entries[0]?.bookingIds, 'JS001, JS002');
+    assert.equal(loaded.breaks.length, 1);
   });
 });
