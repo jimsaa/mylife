@@ -13,6 +13,7 @@ import { SleepPage } from './pages/SleepPage';
 import { FoodPage } from './pages/FoodPage';
 import { TaxiPage } from './pages/TaxiPage';
 import { TaxiImportPage } from './pages/TaxiImportPage';
+import { TaxiShiftReportPage } from './pages/TaxiShiftReportPage';
 import { GoalsPage } from './pages/GoalsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TeslaViewPage } from './pages/TeslaViewPage';
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="mat" element={<FoodPage />} />
             <Route path="taxi" element={<TaxiPage />} />
             <Route path="taxi/import" element={<TaxiImportPage />} />
+            <Route path="taxi/rapport" element={<TaxiShiftReportPage />} />
             <Route path="bets" element={<Navigate to={`${ADMIN_BASE}/bets/results`} replace />} />
             <Route path="bets/results" element={<HpbBetsResultsPage />} />
             <Route path="mal" element={<GoalsPage />} />

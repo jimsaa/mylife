@@ -147,6 +147,9 @@ export function TaxiPage() {
             >
               SKICKA RAPPORT TILL TOBBE
             </Button>
+            <Link to="/admin/taxi/rapport">
+              <Button>MANUELL DAGSREGISTRERING</Button>
+            </Link>
             <Link to="/admin/taxi/import">
               <Button>Import</Button>
             </Link>
