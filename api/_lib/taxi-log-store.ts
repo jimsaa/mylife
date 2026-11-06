@@ -6,6 +6,7 @@ import { access, mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { get, list, put, type GetBlobResult } from '@vercel/blob';
 import { parseTaxiLogImport } from './taxilog/import/taxilogImport';
+import { findOwnBookingLine } from './taxilog/ownBookingLines';
 import {
   buildDailyExportFromState,
   emptyTaxiLogState,
@@ -290,6 +291,11 @@ export async function getDay(date: string) {
     day: loadDailyLogFromState(state, date),
     exportText: buildDailyExportFromState(state, date),
   };
+}
+
+export async function findBooking(bookingId: string) {
+  const state = await loadState();
+  return { match: findOwnBookingLine(state.ownBookingLines ?? [], bookingId) };
 }
 
 export async function parseText(text: string) {

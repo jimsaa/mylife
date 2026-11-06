@@ -45,13 +45,28 @@ export function TaxiImportPage() {
   }
 
   async function handleSave() {
-    if (!parsed) return;
+    if (!parsed || pending) return;
     setPending(true);
+    setError('');
     try {
-      await taxiLogApi.saveDay(parsed.parsed);
+      try {
+        await taxiLogApi.saveDay({ ...parsed.parsed, correctingDate: null });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Kunde inte spara dagen.';
+        if (!message.includes('redan sparat')) throw err;
+        const confirmed = window.confirm(
+          `Datumet ${parsed.parsed.date} är redan sparat. Vill du korrigera just den dagen? Historiken ersätts bara om du bekräftar.`,
+        );
+        if (!confirmed) {
+          setError(message);
+          return;
+        }
+        await taxiLogApi.saveDay({ ...parsed.parsed, correctingDate: parsed.parsed.date });
+      }
       setSaved(`Dagen ${parsed.parsed.date} är sparad.`);
       setError('');
     } catch (err) {
+      setSaved('');
       setError(err instanceof Error ? err.message : 'Kunde inte spara dagen.');
     } finally {
       setPending(false);

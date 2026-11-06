@@ -40,6 +40,14 @@ import {
 } from "./calculations/savings";
 import { todayIsoDate } from "./dates/stockholm";
 import { formatDailyExport, type TaxiLogDailyImport } from "./import/taxilogImport";
+import {
+  applyOwnBookingLines,
+  linesForDate,
+  normalizeDriverId,
+  normalizeStoredOwnBookingLines,
+  type OwnBookingLineInput,
+  type TaxiOwnBookingLine,
+} from "./ownBookingLines";
 import { calculateDailyFinancials, parseChargingKwh, parseWorkedHours } from "./data/dailyFinancials";
 import { DEFAULT_PRIVATE_NET_WITHDRAWAL, DEFAULT_VAT_RATE } from "./settings/defaults";
 
@@ -109,6 +117,14 @@ export type TaxiLogState = {
   payrolls: TaxiPayrollRecord[];
   payments: TaxiPaymentRecord[];
   savingsLedger: SavingsLedgerEntry[];
+  ownBookingLines: TaxiOwnBookingLine[];
+  dayCorrections: TaxiDayCorrection[];
+};
+
+export type TaxiDayCorrection = {
+  date: string;
+  correctedAt: string;
+  changes: { field: string; before: string; after: string }[];
 };
 
 export type DailyLogInput = {
@@ -123,6 +139,10 @@ export type DailyLogInput = {
   uberIncome?: string | null;
   boltIncome?: string | null;
   bonus?: string | null;
+  driverId?: string | null;
+  ownBookingLines?: OwnBookingLineInput[] | null;
+  correctingDate?: string | null;
+  openedFingerprint?: string | null;
 };
 
 export function emptyTaxiLogState(): TaxiLogState {
@@ -134,6 +154,8 @@ export function emptyTaxiLogState(): TaxiLogState {
     payrolls: [],
     payments: [],
     savingsLedger: [],
+    ownBookingLines: [],
+    dayCorrections: [],
   };
 }
 
@@ -162,6 +184,8 @@ export function normalizeTaxiLogState(raw: TaxiLogState): TaxiLogState {
     payrolls,
     payments: raw.payments ?? [],
     savingsLedger,
+    ownBookingLines: normalizeStoredOwnBookingLines(raw.ownBookingLines),
+    dayCorrections: normalizeDayCorrections(raw.dayCorrections),
   };
 }
 
@@ -272,11 +296,135 @@ function applyDaySavings(state: TaxiLogState, date: string, tips: string, bonus:
   return { ...state, savingsLedger: ledger };
 }
 
+function correctionDate(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const date = value.trim();
+  return date || null;
+}
+
+function assertCanSaveWorkDay(state: TaxiLogState, date: string, correctingDate: string | null): void {
+  const exists = state.workDays.some((day) => day.date === date);
+  if (correctingDate && correctingDate !== date) {
+    throw new CalculationError(
+      "CORRECTION_DATE_MISMATCH",
+      `Korrigeringen gäller ${correctingDate} och kan inte sparas på ${date}.`,
+    );
+  }
+  if (correctingDate && !exists) {
+    throw new CalculationError(
+      "DAY_NOT_FOUND",
+      `Datumet ${date} finns inte sparat. Korrigering kan inte skapa en ny dag.`,
+    );
+  }
+  if (exists && correctingDate !== date) {
+    throw new CalculationError(
+      "DAY_ALREADY_SAVED",
+      `Datumet ${date} är redan sparat. Historiken skrivs inte över. Välj Korrigera dagen om den dagen ska ändras.`,
+    );
+  }
+}
+
+function workDayFingerprint(day: TaxiWorkDayRecord, lines: TaxiOwnBookingLine[]): string {
+  const lineKey = lines
+    .filter((line) => line.date === day.date && line.driverId == null)
+    .map((line) => `${line.bookingId}=${Number(line.amount)}`)
+    .sort()
+    .join("|");
+  return [
+    Number(day.workHours),
+    Number(day.ownBookings ?? 0),
+    Number(day.handUp ?? 0),
+    Number(day.uberIncome ?? 0),
+    Number(day.boltIncome ?? 0),
+    Number(day.tips ?? 0),
+    Number(day.bonus ?? 0),
+    lineKey,
+  ].join(";");
+}
+
+function assertOpenedFingerprint(state: TaxiLogState, input: DailyLogInput): void {
+  if (typeof input.openedFingerprint !== "string" || !input.openedFingerprint) return;
+  const day = state.workDays.find((item) => item.date === input.date);
+  if (!day || workDayFingerprint(day, state.ownBookingLines) !== input.openedFingerprint) {
+    throw new CalculationError(
+      "DAY_CHANGED",
+      `Dagen ${input.date} har ändrats sedan den öppnades. Hämta den igen. Ingenting sparades.`,
+    );
+  }
+}
+
+function sameStoredNumber(before: string | null | undefined, after: string | null | undefined): boolean {
+  const left = Number(before ?? 0);
+  const right = Number(after ?? 0);
+  return Number.isFinite(left) && Number.isFinite(right) && left === right;
+}
+
+function normalizeDayCorrections(value: unknown): TaxiDayCorrection[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<TaxiDayCorrection>;
+    if (typeof row.date !== "string" || typeof row.correctedAt !== "string" || !Array.isArray(row.changes)) return [];
+    const changes = row.changes.flatMap((change) => {
+      if (!change || typeof change !== "object") return [];
+      const entry = change as { field?: string; before?: string; after?: string };
+      if (typeof entry.field !== "string") return [];
+      return [{ field: entry.field, before: String(entry.before ?? ""), after: String(entry.after ?? "") }];
+    });
+    return [{ date: row.date, correctedAt: row.correctedAt, changes }];
+  });
+}
+
+function dayCorrectionChanges(
+  before: TaxiWorkDayRecord,
+  after: TaxiWorkDayRecord,
+  beforeLines: TaxiOwnBookingLine[],
+  afterLines: TaxiOwnBookingLine[],
+): TaxiDayCorrection["changes"] {
+  const changes: TaxiDayCorrection["changes"] = [];
+  const fields: Array<[string, string | null | undefined, string | null | undefined]> = [
+    ["Arbetad tid", before.workHours, after.workHours],
+    ["Egen Kund", before.ownBookings, after.ownBookings],
+    ["H-Up", before.handUp, after.handUp],
+    ["Uber", before.uberIncome, after.uberIncome],
+    ["Bolt", before.boltIncome, after.boltIncome],
+    ["Dricks", before.tips, after.tips],
+    ["Bonusar", before.bonus, after.bonus],
+  ];
+  for (const [field, previous, next] of fields) {
+    if (!sameStoredNumber(previous, next)) changes.push({ field, before: previous ?? "", after: next ?? "" });
+  }
+  const previousById = new Map(beforeLines.map((line) => [line.bookingId, line.amount]));
+  const nextById = new Map(afterLines.map((line) => [line.bookingId, line.amount]));
+  for (const [bookingId, amount] of nextById) {
+    const previous = previousById.get(bookingId);
+    if (previous === undefined) changes.push({ field: `Bokning ${bookingId}`, before: "", after: amount });
+    else if (!sameStoredNumber(previous, amount)) changes.push({ field: `Bokning ${bookingId}`, before: previous, after: amount });
+  }
+  for (const [bookingId, amount] of previousById) {
+    if (!nextById.has(bookingId)) changes.push({ field: `Bokning ${bookingId}`, before: amount, after: "" });
+  }
+  return changes;
+}
+
 export function saveDailyLogToState(state: TaxiLogState, input: DailyLogInput): TaxiLogState {
   parseIsoDate(input.date);
   const normalized = normalizeTaxiLogState(state);
   const period = yearMonthFromDate(input.date);
   assertMonthUnlocked(normalized, period.year, period.month);
+  assertCanSaveWorkDay(normalized, input.date, correctionDate(input.correctingDate));
+  assertOpenedFingerprint(normalized, input);
+  const driverId = normalizeDriverId(input.driverId);
+  if (driverId !== null) {
+    return {
+      ...normalized,
+      ownBookingLines: applyOwnBookingLines(normalized.ownBookingLines, {
+        date: input.date,
+        driverId,
+        ownBookingLines: input.ownBookingLines,
+      }),
+    };
+  }
 
   const vatRate = normalized.vatRate || DEFAULT_VAT_RATE;
   const financials = calculateDailyFinancials({
@@ -339,7 +487,28 @@ export function saveDailyLogToState(state: TaxiLogState, input: DailyLogInput): 
     bonus,
   );
 
-  return syncPayrollInState(next, period.year, period.month, todayIsoDate());
+  const saved = syncPayrollInState(next, period.year, period.month, todayIsoDate());
+  const ownBookingLines = applyOwnBookingLines(normalized.ownBookingLines, {
+    date: input.date,
+    driverId: null,
+    ownBookingLines: input.ownBookingLines,
+  });
+  const previousDay = normalized.workDays.find((day) => day.date === input.date);
+  const changes = previousDay
+    ? dayCorrectionChanges(
+        previousDay,
+        workDay,
+        normalized.ownBookingLines.filter((line) => line.date === input.date && line.driverId === null),
+        ownBookingLines.filter((line) => line.date === input.date && line.driverId === null),
+      )
+    : [];
+  return {
+    ...saved,
+    ownBookingLines,
+    dayCorrections: changes.length === 0
+      ? normalized.dayCorrections
+      : [...normalized.dayCorrections, { date: input.date, correctedAt: new Date().toISOString(), changes }],
+  };
 }
 
 export function loadDailyLogFromState(state: TaxiLogState, date: string) {
@@ -373,6 +542,9 @@ export function loadDailyLogFromState(state: TaxiLogState, date: string) {
     workedHours: workDay?.workHours ?? "0",
     chargingKwh: charging?.kwh ?? "0",
     sourceCategorized: workDay ? isV3Categorized(workDay) : false,
+    ownBookingLines: linesForDate(normalized.ownBookingLines, date),
+    corrections: normalized.dayCorrections.filter((entry) => entry.date === date),
+    fingerprint: workDay ? workDayFingerprint(workDay, normalized.ownBookingLines) : "",
   };
 }
 

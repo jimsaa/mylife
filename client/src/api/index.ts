@@ -14,6 +14,7 @@ import type {
   TaxiData,
   TaxiLogMonth,
   TaxiLogParseResult,
+  TaxiOwnBookingLine,
   TaxiShift,
   TimeEntry,
   TimerStatus,
@@ -161,6 +162,10 @@ export const taxiLogApi = {
     api.get<{ day: TaxiLogMonth['days'][number] | null; exportText: string | null }>(
       `/taxi-log/day?date=${date}`,
     ),
+  findBooking: (bookingId: string) =>
+    api.get<{ match: TaxiOwnBookingLine | null }>(
+      `/taxi-log/day?bookingId=${encodeURIComponent(bookingId)}`,
+    ),
   parse: (text: string) => api.post<TaxiLogParseResult>('/taxi-log/parse', { text }),
   report: (date: string) =>
     api.post<{ sent: boolean; recipient: string }>('/taxi-log/report', { date }),
@@ -176,6 +181,10 @@ export const taxiLogApi = {
     uberIncome?: string | null;
     boltIncome?: string | null;
     bonus?: string | null;
+    driverId?: string | null;
+    correctingDate?: string | null;
+    openedFingerprint?: string | null;
+    ownBookingLines?: TaxiOwnBookingLine[] | null;
   }) =>
     api.post<{ day: TaxiLogMonth['days'][number] | null; exportText: string | null }>(
       '/taxi-log/day',

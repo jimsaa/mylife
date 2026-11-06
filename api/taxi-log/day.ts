@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDay, saveDay } from '../_lib/taxi-log-store';
+import { findBooking, getDay, saveDay } from '../_lib/taxi-log-store';
 import { handleTaxiLogReport } from '../_lib/taxilog/reportHandler';
 import { methodNotAllowed, readJsonBody, requireAdmin } from '../_lib/vercel-http';
 
@@ -17,6 +17,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     if (req.method === 'GET') {
+      const bookingId = String(req.query.bookingId ?? '').trim();
+      if (bookingId) {
+        res.status(200).json(await findBooking(bookingId));
+        return;
+      }
       res.status(200).json(await getDay(String(req.query.date ?? '')));
       return;
     }
@@ -33,6 +38,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         uberIncome?: string | null;
         boltIncome?: string | null;
         bonus?: string | null;
+        driverId?: string | null;
+        correctingDate?: string | null;
+        openedFingerprint?: string | null;
+        ownBookingLines?: Array<{
+          bookingId?: string;
+          amount?: string | number;
+          date?: string;
+          driverId?: string | null;
+          recordedAt?: string;
+        }> | null;
       }>(req);
       res.status(201).json(
         await saveDay({
@@ -49,6 +64,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           uberIncome: body.uberIncome,
           boltIncome: body.boltIncome,
           bonus: body.bonus,
+          driverId: body.driverId,
+          correctingDate: body.correctingDate,
+          openedFingerprint: body.openedFingerprint,
+          ownBookingLines: body.ownBookingLines,
         }),
       );
       return;

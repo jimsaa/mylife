@@ -1,27 +1,39 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { parseTaxiLogImport } from './import/taxilogImport.ts';
-import { emptyTaxiLogState, saveDailyLogToState, type TaxiPayrollRecord } from './service.ts';
+import { emptyTaxiLogState, loadDailyLogFromState, saveDailyLogToState, type TaxiPayrollRecord } from './service.ts';
 import {
   addBreak,
   addShiftEntry,
+  applySavedDayLoad,
+  beginEmptyShift,
+  commitHistoricalCorrection,
+  draftFromSavedDay,
+  draftHasUnsavedWork,
+  historicalCorrectionPlan,
   calculateReportedWork,
   cashTotal,
   categorySharePercent,
   categorySum,
   drivingGross,
+  decideShiftSave,
   emptyTaxiShiftDraft,
   endShift,
   formatWorkDuration,
   instantToStockholmInput,
+  finishShiftClose,
   loadTaxiShiftDraft,
+  savedDateBlock,
+  startNewShiftDraft,
   markShiftClosed,
+  ownBookingLinesFromDraft,
   planShiftClose,
   reopenShiftForCorrection,
+  withServerBookingLines,
   reportedHoursValue,
   editShiftAmountInput,
   normalizeStockholmTime,
-  parseBookingIds,
+  parseBookingId,
   parseShiftAmount,
   stockholmFieldsToInstant,
   removeBreak,
@@ -30,6 +42,7 @@ import {
   saveTaxiShiftDraft,
   setShiftEnd,
   setShiftStart,
+  stockholmCalendarDate,
   startBreak,
   startShift,
   stockholmInputToInstant,
@@ -363,8 +376,8 @@ describe('TaxiLog shift draft', () => {
       }),
     );
     const oldDraft = loadTaxiShiftDraft(legacyEntry);
-    assert.equal(oldDraft.entries[0]?.bookingIds, undefined);
-    assert.equal(oldDraft.entries[1]?.bookingIds, undefined);
+    assert.equal(oldDraft.entries[0]?.bookingId, undefined);
+    assert.equal(oldDraft.entries[1]?.bookingId, undefined);
     assert.equal(categorySum(oldDraft, 'ownBookings'), '1800.00');
     assert.equal(drivingGross(oldDraft), '1900.00');
     const invalid = calculateReportedWork(
@@ -374,11 +387,11 @@ describe('TaxiLog shift draft', () => {
     assert.deepEqual(invalid, { shiftMs: 0, breakMs: 0, reportedMs: 0 });
   });
 
-  it('stores several booking ids on an own booking and ignores them in the totals', () => {
-    assert.equal(parseBookingIds('JS001, JS002'), 'JS001, JS002');
-    assert.equal(parseBookingIds(' JS001,JS002 '), 'JS001, JS002');
-    assert.equal(parseBookingIds(''), null);
-    assert.equal(parseBookingIds('JS 001'), null);
+  it('stores one booking id on an own booking and ignores it in the totals', () => {
+    assert.equal(parseBookingId(' JS001 '), 'JS001');
+    assert.equal(parseBookingId('JS001, JS002'), null);
+    assert.equal(parseBookingId(''), null);
+    assert.equal(parseBookingId('JS 001'), null);
 
     let draft = startShift(emptyTaxiShiftDraft(), '2026-11-05T03:45:00.000Z');
     draft = addShiftEntry(draft, {
@@ -386,37 +399,37 @@ describe('TaxiLog shift draft', () => {
       categoryId: 'ownBookings',
       amount: '1800.00',
       recordedAt: '2026-11-05T08:00:00.000Z',
-      bookingIds: 'JS001,JS002',
+      bookingId: 'JS001',
     });
     draft = addShiftEntry(draft, {
       id: 'uber-1',
       categoryId: 'uberIncome',
       amount: '200.00',
       recordedAt: '2026-11-05T09:00:00.000Z',
-      bookingIds: 'NOPE',
+      bookingId: 'NOPE',
     });
-    assert.equal(draft.entries[0]?.bookingIds, 'JS001, JS002');
-    assert.equal(draft.entries[1]?.bookingIds, undefined);
+    assert.equal(draft.entries[0]?.bookingId, 'JS001');
+    assert.equal(draft.entries[1]?.bookingId, undefined);
     assert.equal(categorySum(draft, 'ownBookings'), '1800.00');
     assert.equal(categorySharePercent(draft, 'ownBookings'), '90');
     const before = calculateReportedWork(draft, '2026-11-05T15:45:00.000Z');
 
-    draft = updateShiftEntry(draft, 'own-1', '1800.00', 'JS001, JS003');
-    assert.equal(draft.entries[0]?.bookingIds, 'JS001, JS003');
+    draft = updateShiftEntry(draft, 'own-1', '1800.00', 'JS003');
+    assert.equal(draft.entries[0]?.bookingId, 'JS003');
     assert.deepEqual(calculateReportedWork(draft, '2026-11-05T15:45:00.000Z'), before);
 
     const storage = memoryStorage();
     saveTaxiShiftDraft(storage, draft);
     const loaded = loadTaxiShiftDraft(storage);
-    assert.equal(loaded.entries[0]?.bookingIds, 'JS001, JS003');
+    assert.equal(loaded.entries[0]?.bookingId, 'JS003');
     assert.equal(loaded.entries[0]?.amount, '1800.00');
 
     draft = updateShiftEntry(draft, 'own-1', '1800.00', null);
-    assert.equal(draft.entries[0]?.bookingIds, undefined);
+    assert.equal(draft.entries[0]?.bookingId, undefined);
     draft = removeShiftEntry(draft, 'own-1');
     assert.equal(draft.entries.some((entry) => entry.id === 'own-1'), false);
     saveTaxiShiftDraft(storage, draft);
-    assert.equal(loadTaxiShiftDraft(storage).entries.some((entry) => entry.bookingIds), false);
+    assert.equal(loadTaxiShiftDraft(storage).entries.some((entry) => entry.bookingId), false);
   });
 
   it('keeps the same draft when start and end are set, corrected, and cross midnight', () => {
@@ -431,7 +444,7 @@ describe('TaxiLog shift draft', () => {
       categoryId: 'ownBookings',
       amount: '1800.00',
       recordedAt: '2026-11-05T21:00:00.000Z',
-      bookingIds: 'JS001, JS002',
+      bookingId: 'JS001',
     });
     draft = addBreak(draft, {
       id: 'night',
@@ -454,7 +467,7 @@ describe('TaxiLog shift draft', () => {
     assert.equal(formatWorkDuration(work.shiftMs), '7 h');
     assert.equal(formatWorkDuration(work.reportedMs), '6 h 30 min');
     assert.equal(draft.entries[0]?.amount, '1800.00');
-    assert.equal(draft.entries[0]?.bookingIds, 'JS001, JS002');
+    assert.equal(draft.entries[0]?.bookingId, 'JS001');
     assert.equal(draft.breaks[0]?.startedAt, '2026-11-05T22:00:00.000Z');
     assert.equal(draft.breaks[0]?.endedAt, '2026-11-05T22:30:00.000Z');
 
@@ -470,7 +483,7 @@ describe('TaxiLog shift draft', () => {
     const loaded = loadTaxiShiftDraft(storage);
     assert.equal(loaded.startedAt, draft.startedAt);
     assert.equal(loaded.endedAt, draft.endedAt);
-    assert.equal(loaded.entries[0]?.bookingIds, 'JS001, JS002');
+    assert.equal(loaded.entries[0]?.bookingId, 'JS001');
     assert.equal(loaded.breaks.length, 1);
   });
 
@@ -494,7 +507,7 @@ describe('TaxiLog shift draft', () => {
       categoryId: 'ownBookings',
       amount: '1800.00',
       recordedAt: '2026-11-05T04:00:00.000Z',
-      bookingIds: 'JS001, JS002',
+      bookingId: 'JS001',
     });
     draft = addShiftEntry(draft, {
       id: 'uber-1',
@@ -545,7 +558,7 @@ describe('TaxiLog shift draft', () => {
     assert.match(planned.plan.text, /WORKED_HOURS=11\.25/);
     assert.equal(planned.plan.text.includes('JS001'), false);
     assert.equal(draft.closedAt, null);
-    assert.equal(draft.entries.find((entry) => entry.id === 'own-1')?.bookingIds, 'JS001, JS002');
+    assert.equal(draft.entries.find((entry) => entry.id === 'own-1')?.bookingId, 'JS001');
 
     const parsed = parseTaxiLogImport(planned.plan.text);
     assert.equal(parsed.version, '3');
@@ -576,6 +589,7 @@ describe('TaxiLog shift draft', () => {
     assert.equal(saved.workDays[0]?.ownBookings, '1800');
 
     const replaced = saveDailyLogToState(saved, {
+      correctingDate: parsed.date,
       date: parsed.date,
       grossIncome: parsed.grossIncome,
       tips: '5',
@@ -620,11 +634,11 @@ describe('TaxiLog shift draft', () => {
 
     const cleared = setShiftEnd(draft, null);
     assert.equal(planShiftClose(cleared, now).ok, false);
-    assert.equal(cleared.entries.find((entry) => entry.id === 'own-1')?.bookingIds, 'JS001, JS002');
+    assert.equal(cleared.entries.find((entry) => entry.id === 'own-1')?.bookingId, 'JS001');
 
     const closed = markShiftClosed(draft, '2026-11-05T16:05:00.000Z', planned.plan.date);
     assert.equal(closed.closedDate, '2026-11-05');
-    assert.equal(closed.entries.find((entry) => entry.id === 'own-1')?.bookingIds, 'JS001, JS002');
+    assert.equal(closed.entries.find((entry) => entry.id === 'own-1')?.bookingId, 'JS001');
     const reopened = reopenShiftForCorrection(closed);
     assert.equal(reopened.closedAt, null);
     assert.equal(reopened.entries.length, closed.entries.length);
@@ -636,7 +650,7 @@ describe('TaxiLog shift draft', () => {
     const stored = memoryStorage();
     saveTaxiShiftDraft(stored, closed);
     assert.equal(loadTaxiShiftDraft(stored).closedAt, closed.closedAt);
-    assert.equal(loadTaxiShiftDraft(stored).entries[0]?.bookingIds, 'JS001, JS002');
+    assert.equal(loadTaxiShiftDraft(stored).entries[0]?.bookingId, 'JS001');
 
     const versionOne = parseTaxiLogImport(`TAXILOG_IMPORT
 VERSION=1
@@ -648,7 +662,627 @@ END_TAXILOG_IMPORT`);
     assert.equal(versionOne.version, '1');
     assert.equal(versionOne.grossIncome, '100');
   });
+
+  it('stores individual bookings permanently without changing the salary day', () => {
+    const recordedAt = '2026-11-05T08:00:00.000Z';
+    const day = {
+      date: '2026-11-05',
+      grossIncome: '1800',
+      tips: '0',
+      workedHours: '8',
+      ownBookings: '1800',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+    };
+    const plain = saveDailyLogToState(emptyTaxiLogState(), day);
+    const saved = saveDailyLogToState(emptyTaxiLogState(), {
+      ...day,
+      ownBookingLines: [
+        { bookingId: 'JS001', amount: '800', recordedAt },
+        { bookingId: 'JS002', amount: '1000', recordedAt },
+      ],
+    });
+    assert.equal(saved.ownBookingLines.length, 2);
+    assert.equal(saved.ownBookingLines[0]?.bookingId, 'JS001');
+    assert.equal(saved.ownBookingLines[1]?.amount, '1000.00');
+    assert.equal(saved.workDays[0]?.ownBookings, '1800');
+    assert.equal(saved.workDays[0]?.totalIncome, plain.workDays[0]?.totalIncome);
+    assert.equal(saved.workDays[0]?.vatAmount, plain.workDays[0]?.vatAmount);
+    assert.equal(saved.workDays[0]?.incomeExVat, plain.workDays[0]?.incomeExVat);
+    assert.equal(saved.payrolls[0]?.accruedSalary, plain.payrolls[0]?.accruedSalary);
+
+    const opened = loadDailyLogFromState(saved, '2026-11-05');
+    assert.equal(opened?.ownBookingLines.length, 2);
+    assert.equal(opened?.ownBookingLines[0]?.bookingId, 'JS001');
+    assert.equal(opened?.ownBookings, '1800');
+
+    const renamed = saveDailyLogToState(saved, {
+      ...day,
+      correctingDate: day.date,
+      ownBookingLines: [
+        { bookingId: 'JS009', amount: '800', recordedAt },
+        { bookingId: 'JS002', amount: '1000', recordedAt },
+      ],
+    });
+    assert.equal(renamed.workDays[0]?.ownBookings, saved.workDays[0]?.ownBookings);
+    assert.equal(renamed.workDays[0]?.totalIncome, saved.workDays[0]?.totalIncome);
+    assert.equal(renamed.workDays[0]?.vatAmount, saved.workDays[0]?.vatAmount);
+    assert.equal(renamed.ownBookingLines.find((line) => line.bookingId === 'JS009')?.amount, '800.00');
+
+    assert.throws(
+      () => saveDailyLogToState(renamed, {
+        ...day,
+        date: '2026-11-06',
+        ownBookingLines: [{ bookingId: 'JS009', amount: '100', recordedAt }],
+      }),
+      /finns redan/,
+    );
+    assert.equal(loadDailyLogFromState(renamed, '2026-11-05')?.ownBookingLines.length, 2);
+
+    const historical = saveDailyLogToState(emptyTaxiLogState(), day);
+    assert.deepEqual(historical.ownBookingLines, []);
+    assert.deepEqual(loadDailyLogFromState(historical, '2026-11-05')?.ownBookingLines, []);
+    assert.equal(loadDailyLogFromState(historical, '2026-11-05')?.ownBookings, '1800');
+
+    const otherDriver = saveDailyLogToState(saved, {
+      ...day,
+      correctingDate: day.date,
+      driverId: 'driver-b',
+      grossIncome: '500',
+      ownBookings: '500',
+      ownBookingLines: [{ bookingId: 'JS100', amount: '500', recordedAt }],
+    });
+    assert.equal(otherDriver.workDays.length, 1);
+    assert.equal(otherDriver.workDays[0]?.ownBookings, '1800');
+    assert.equal(otherDriver.workDays[0]?.totalIncome, saved.workDays[0]?.totalIncome);
+    assert.equal(otherDriver.ownBookingLines.filter((line) => line.date === '2026-11-05').length, 3);
+    assert.equal(otherDriver.ownBookingLines.find((line) => line.bookingId === 'JS100')?.driverId, 'driver-b');
+
+    const legacy = loadTaxiShiftDraft(memoryStorage(JSON.stringify({
+      version: 1,
+      startedAt: '2026-11-05T03:45:00.000Z',
+      endedAt: null,
+      entries: [{
+        id: 'old',
+        categoryId: 'ownBookings',
+        amount: '50.00',
+        recordedAt,
+        bookingIds: 'JS001',
+      }],
+      breaks: [],
+    })));
+    assert.equal(legacy.entries[0]?.bookingId, 'JS001');
+
+    let draft = emptyTaxiShiftDraft();
+    draft = setShiftStart(draft, '2026-11-05T03:45:00.000Z');
+    draft = setShiftEnd(draft, '2026-11-05T15:45:00.000Z');
+    draft = addShiftEntry(draft, {
+      id: 'a',
+      categoryId: 'ownBookings',
+      amount: '800.00',
+      recordedAt,
+      bookingId: 'JS001',
+    });
+    draft = addShiftEntry(draft, {
+      id: 'b',
+      categoryId: 'ownBookings',
+      amount: '1000.00',
+      recordedAt,
+      bookingId: 'JS002',
+    });
+    const collected = ownBookingLinesFromDraft(draft, '2026-11-05');
+    assert.equal(collected.ok, true);
+    if (collected.ok) assert.equal(collected.lines.length, 2);
+    const restored = withServerBookingLines(emptyTaxiShiftDraft(), [
+      { bookingId: 'JS001', amount: '800.00', recordedAt },
+      { bookingId: 'JS002', amount: '1000.00', recordedAt },
+    ]);
+    assert.equal(restored.entries.length, 2);
+    assert.equal(restored.entries[1]?.bookingId, 'JS002');
+    assert.equal(finishShiftClose(draft, { ok: false }).closedAt, null);
+    const closedDay = finishShiftClose(draft, { ok: true, savedAt: recordedAt, date: '2026-11-05' });
+    assert.equal(closedDay.closedAt, recordedAt);
+    const unsaved = startNewShiftDraft(draft, '2026-11-06');
+    assert.equal(unsaved, draft);
+    assert.equal(unsaved.entries[0]?.bookingId, 'JS001');
+    const nextDay = startNewShiftDraft(closedDay, '2026-11-06');
+    assert.equal(nextDay.workDate, '2026-11-06');
+    assert.equal(nextDay.startedAt, null);
+    assert.equal(nextDay.endedAt, null);
+    assert.equal(nextDay.entries.length, 0);
+    assert.equal(nextDay.breaks.length, 0);
+    assert.equal(nextDay.closedAt, null);
+    assert.equal(savedDateBlock('2026-11-05', true, null)?.includes('redan sparat'), true);
+    assert.equal(savedDateBlock('2026-11-06', false, null), null);
+    assert.equal(savedDateBlock('2026-11-05', true, '2026-11-05'), null);
+    const reopened = reopenShiftForCorrection(closedDay);
+    assert.equal(reopened.correctingDate, '2026-11-05');
+    assert.equal(reopened.entries[0]?.bookingId, 'JS001');
+  });
+
+  it('A–C saves two dates separately and corrects only the chosen date', () => {
+    const recordedAt = '2026-11-05T18:00:00.000Z';
+    const firstDay = {
+      date: '2026-11-05',
+      grossIncome: '1800',
+      tips: '0',
+      workedHours: '8',
+      ownBookings: '1800',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+      ownBookingLines: [
+        { bookingId: 'JS001', amount: '800', recordedAt },
+        { bookingId: 'JS002', amount: '1000', recordedAt },
+      ],
+    };
+    const first = saveDailyLogToState(emptyTaxiLogState(), firstDay);
+    let closed = emptyTaxiShiftDraft();
+    closed = setShiftStart(closed, '2026-11-05T07:00:00.000Z');
+    closed = addShiftEntry(closed, {
+      id: 'a',
+      categoryId: 'ownBookings',
+      amount: '800.00',
+      recordedAt,
+      bookingId: 'JS001',
+    });
+    closed = finishShiftClose(closed, { ok: true, savedAt: recordedAt, date: '2026-11-05' });
+    const nextDraft = startNewShiftDraft(closed, '2026-11-06');
+    assert.equal(nextDraft.workDate, '2026-11-06');
+    assert.equal(nextDraft.correctingDate, null);
+    assert.equal(nextDraft.entries.length, 0);
+    assert.equal(nextDraft.startedAt, null);
+
+    const second = saveDailyLogToState(first, {
+      date: '2026-11-06',
+      grossIncome: '500',
+      tips: '20',
+      workedHours: '4',
+      ownBookings: '500',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+      ownBookingLines: [{ bookingId: 'JS010', amount: '500', recordedAt: '2026-11-06T08:00:00.000Z' }],
+    });
+    const dayFive = loadDailyLogFromState(second, '2026-11-05');
+    const daySix = loadDailyLogFromState(second, '2026-11-06');
+    assert.equal(dayFive?.ownBookings, '1800');
+    assert.equal(dayFive?.grossIncome, '1800.00');
+    assert.deepEqual(dayFive?.ownBookingLines.map((line) => [line.bookingId, line.amount]), [
+      ['JS001', '800.00'],
+      ['JS002', '1000.00'],
+    ]);
+    assert.equal(daySix?.ownBookings, '500');
+    assert.equal(daySix?.tips, '20.00');
+    assert.deepEqual(daySix?.ownBookingLines.map((line) => [line.bookingId, line.amount]), [['JS010', '500.00']]);
+
+    assert.throws(() => saveDailyLogToState(second, firstDay), /redan sparat/);
+    assert.equal(loadDailyLogFromState(second, '2026-11-05')?.ownBookings, '1800');
+    assert.equal(loadDailyLogFromState(second, '2026-11-05')?.ownBookingLines[0]?.bookingId, 'JS001');
+    assert.throws(
+      () => saveDailyLogToState(second, { ...firstDay, date: '2026-11-06', correctingDate: '2026-11-05' }),
+      /Korrigeringen gäller 2026-11-05/,
+    );
+    assert.equal(loadDailyLogFromState(second, '2026-11-06')?.ownBookings, '500');
+
+    const corrected = saveDailyLogToState(second, {
+      ...firstDay,
+      grossIncome: '1900',
+      ownBookings: '1900',
+      correctingDate: '2026-11-05',
+      ownBookingLines: [
+        { bookingId: 'JS001', amount: '900', recordedAt },
+        { bookingId: 'JS002', amount: '1000', recordedAt },
+      ],
+    });
+    assert.equal(loadDailyLogFromState(corrected, '2026-11-05')?.ownBookings, '1900');
+    assert.equal(loadDailyLogFromState(corrected, '2026-11-05')?.ownBookingLines[0]?.amount, '900.00');
+    assert.equal(loadDailyLogFromState(corrected, '2026-11-06')?.ownBookings, '500');
+    assert.equal(loadDailyLogFromState(corrected, '2026-11-06')?.ownBookingLines[0]?.bookingId, 'JS010');
+    assert.equal(loadDailyLogFromState(corrected, '2026-11-06')?.grossIncome, daySix?.grossIncome);
+  });
+
+  it('D keeps the draft when the TaxiLog check fails', () => {
+    const draft = addShiftEntry(setShiftStart(emptyTaxiShiftDraft(), '2026-11-05T07:00:00.000Z'), {
+      id: 'a',
+      categoryId: 'ownBookings',
+      amount: '800.00',
+      recordedAt: '2026-11-05T08:00:00.000Z',
+      bookingId: 'JS001',
+    });
+    const decision = decideShiftSave({ status: 'unavailable' });
+    assert.equal(decision.allowSave, false);
+    assert.match(decision.message ?? '', /Ingenting sparades/);
+    const kept = decision.allowSave
+      ? finishShiftClose(draft, { ok: true, savedAt: '2026-11-05T16:00:00.000Z', date: '2026-11-05' })
+      : draft;
+    assert.equal(kept, draft);
+    assert.equal(kept.closedAt, null);
+    assert.equal(kept.entries[0]?.bookingId, 'JS001');
+    assert.equal(kept.entries[0]?.amount, '800.00');
+    const blocked = decideShiftSave({
+      status: 'ready',
+      date: '2026-11-05',
+      alreadySaved: true,
+      correctingDate: null,
+    });
+    assert.equal(blocked.allowSave, false);
+    assert.match(blocked.message ?? '', /redan sparat/);
+  });
+
+  it('E keeps an overnight shift on the Swedish start date', () => {
+    const startedAt = stockholmInputToInstant('2026-11-06T19:00');
+    const endedAt = stockholmInputToInstant('2026-11-07T04:00');
+    assert.ok(startedAt);
+    assert.ok(endedAt);
+    const draft = setShiftEnd(setShiftStart(emptyTaxiShiftDraft(), startedAt), endedAt);
+    const planned = planShiftClose(draft, endedAt);
+    assert.equal(planned.ok, true);
+    if (!planned.ok) return;
+    assert.equal(planned.plan.date, '2026-11-06');
+    assert.equal(planned.plan.workedHours, '9.00');
+    assert.equal(formatWorkDuration(calculateReportedWork(draft, endedAt).shiftMs), '9 h');
+    const saved = saveDailyLogToState(emptyTaxiLogState(), {
+      date: planned.plan.date,
+      grossIncome: '400',
+      tips: '0',
+      workedHours: planned.plan.workedHours,
+      ownBookings: '400',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+      ownBookingLines: [{ bookingId: 'JS020', amount: '400', recordedAt: startedAt }],
+    });
+    const loaded = loadDailyLogFromState(saved, '2026-11-06');
+    assert.equal(loaded?.date, '2026-11-06');
+    assert.equal(Number(loaded?.workedHours), 9);
+    assert.equal(loaded?.ownBookings, '400');
+    assert.equal(loaded?.ownBookingLines[0]?.bookingId, 'JS020');
+    assert.equal(loadDailyLogFromState(saved, '2026-11-07'), null);
+  });
+
+  it('F uses Europe/Stockholm around midnight in winter and summer', () => {
+    assert.equal(stockholmCalendarDate('2026-11-05T22:30:00.000Z'), '2026-11-05');
+    assert.equal(stockholmCalendarDate('2026-11-05T23:30:00.000Z'), '2026-11-06');
+    assert.equal(stockholmCalendarDate('2026-07-14T21:30:00.000Z'), '2026-07-14');
+    assert.equal(stockholmCalendarDate('2026-07-14T22:30:00.000Z'), '2026-07-15');
+
+    const startedAt = stockholmInputToInstant('2026-11-05T23:30');
+    const endedAt = stockholmInputToInstant('2026-11-06T01:00');
+    assert.ok(startedAt);
+    assert.ok(endedAt);
+    const started = setShiftStart(emptyTaxiShiftDraft(), startedAt);
+    assert.equal(startNewShiftDraft(started, '2026-11-06'), started);
+    const planned = planShiftClose(setShiftEnd(started, endedAt), endedAt);
+    assert.equal(planned.ok, true);
+    if (!planned.ok) return;
+    assert.equal(planned.plan.date, '2026-11-05');
+  });
+
+  it('G clears correction mode when a new day starts', () => {
+    const recordedAt = '2026-11-05T16:00:00.000Z';
+    const closed = finishShiftClose(
+      addShiftEntry(setShiftStart(emptyTaxiShiftDraft(), '2026-11-05T07:00:00.000Z'), {
+        id: 'a',
+        categoryId: 'ownBookings',
+        amount: '800.00',
+        recordedAt,
+        bookingId: 'JS001',
+      }),
+      { ok: true, savedAt: recordedAt, date: '2026-11-05' },
+    );
+    const reopened = reopenShiftForCorrection(closed);
+    assert.equal(reopened.correctingDate, '2026-11-05');
+    assert.equal(startNewShiftDraft(reopened, '2026-11-06'), reopened);
+    assert.equal(reopened.entries[0]?.bookingId, 'JS001');
+    const sealed = markShiftClosed(reopened, recordedAt, '2026-11-05');
+    const fresh = startNewShiftDraft(sealed, '2026-11-06');
+    assert.equal(fresh.correctingDate, null);
+    assert.equal(fresh.workDate, '2026-11-06');
+    assert.equal(fresh.entries.length, 0);
+    assert.equal(fresh.startedAt, null);
+    assert.equal(fresh.breaks.length, 0);
+    assert.equal(sealed.correctingDate, '2026-11-05');
+    assert.equal(sealed.entries[0]?.bookingId, 'JS001');
+  });
+
+  it('A–H opens a saved day, adds and edits bookings, and leaves the other day unchanged', () => {
+    const recordedAt = '2026-11-05T18:00:00.000Z';
+    const now = '2026-11-06T10:00:00.000Z';
+    const first = saveDailyLogToState(emptyTaxiLogState(), {
+      date: '2026-11-05',
+      grossIncome: '2150',
+      tips: '40',
+      workedHours: '9',
+      ownBookings: '1800',
+      handUp: '50',
+      uberIncome: '200',
+      boltIncome: '100',
+      bonus: '10',
+      ownBookingLines: [
+        { bookingId: 'JS001', amount: '800', recordedAt },
+        { bookingId: 'JS002', amount: '1000', recordedAt },
+      ],
+    });
+    const both = saveDailyLogToState(first, {
+      date: '2026-11-06',
+      grossIncome: '500',
+      tips: '20',
+      workedHours: '4',
+      ownBookings: '500',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+      ownBookingLines: [{ bookingId: 'JS010', amount: '500', recordedAt: '2026-11-06T08:00:00.000Z' }],
+    });
+    const loaded = loadDailyLogFromState(both, '2026-11-05');
+    assert.ok(loaded);
+    const opened = draftFromSavedDay(loaded, now);
+    assert.equal(opened.correctingDate, '2026-11-05');
+    assert.equal(opened.startedAt, null);
+    assert.equal(opened.endedAt, null);
+    assert.equal(opened.breaks.length, 0);
+    assert.equal(opened.loadedWorkedHours, loaded.workedHours);
+    assert.equal(categorySum(opened, 'ownBookings'), '1800.00');
+    assert.equal(categorySum(opened, 'uberIncome'), '200.00');
+    assert.equal(categorySum(opened, 'boltIncome'), '100.00');
+    assert.equal(categorySum(opened, 'handUp'), '50.00');
+    assert.equal(categorySum(opened, 'tips'), '40.00');
+    assert.equal(categorySum(opened, 'bonus'), '10.00');
+    assert.deepEqual(
+      opened.entries.filter((entry) => entry.bookingId).map((entry) => [entry.bookingId, entry.amount]),
+      [['JS001', '800.00'], ['JS002', '1000.00']],
+    );
+
+    const withLate = addShiftEntry(opened, {
+      id: 'late',
+      categoryId: 'ownBookings',
+      amount: '850.00',
+      recordedAt: now,
+      bookingId: 'JS003',
+    });
+    const added = saveOpenedDay(both, withLate);
+    const dayFive = loadDailyLogFromState(added, '2026-11-05');
+    const daySix = loadDailyLogFromState(added, '2026-11-06');
+    assert.equal(Number(dayFive?.ownBookings), 2650);
+    assert.equal(dayFive?.ownBookingLines.find((line) => line.bookingId === 'JS003')?.amount, '850.00');
+    assert.equal(dayFive?.ownBookingLines.find((line) => line.bookingId === 'JS001')?.amount, '800.00');
+    assert.equal(daySix?.ownBookings, '500');
+    assert.equal(daySix?.tips, '20.00');
+    assert.equal(daySix?.ownBookingLines[0]?.bookingId, 'JS010');
+    assert.equal(dayFive?.corrections?.some((entry) => entry.changes.some((change) => change.field === 'Bokning JS003' && change.after === '850.00')), true);
+    const cleanFive = saveDailyLogToState(emptyTaxiLogState(), {
+      date: '2026-11-05',
+      grossIncome: '3000',
+      tips: '40',
+      workedHours: '9',
+      ownBookings: '2650',
+      handUp: '50',
+      uberIncome: '200',
+      boltIncome: '100',
+      bonus: '10',
+    });
+    const cleanBoth = saveDailyLogToState(cleanFive, {
+      date: '2026-11-06',
+      grossIncome: '500',
+      tips: '20',
+      workedHours: '4',
+      ownBookings: '500',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+    });
+    assert.equal(added.payrolls.find((row) => row.month === 11)?.accruedSalary, cleanBoth.payrolls.find((row) => row.month === 11)?.accruedSalary);
+    assert.equal(cleanBoth.dayCorrections.length, 0);
+
+    const changed = updateShiftEntry(opened, 'booking-JS001', '900.00');
+    const renamedAmount = saveOpenedDay(both, changed);
+    const changedDay = loadDailyLogFromState(renamedAmount, '2026-11-05');
+    assert.equal(Number(changedDay?.ownBookings), 1900);
+    assert.notEqual(Number(changedDay?.ownBookings), 2700);
+    assert.equal(changedDay?.ownBookingLines.length, 2);
+    assert.equal(loadDailyLogFromState(renamedAmount, '2026-11-06')?.ownBookings, '500');
+
+    const removed = removeShiftEntry(opened, 'booking-JS002');
+    const withoutSecond = saveOpenedDay(both, removed);
+    const removedDay = loadDailyLogFromState(withoutSecond, '2026-11-05');
+    assert.equal(Number(removedDay?.ownBookings), 800);
+    assert.equal(removedDay?.ownBookingLines.length, 1);
+    assert.equal(removedDay?.ownBookingLines[0]?.bookingId, 'JS001');
+    assert.equal(loadDailyLogFromState(withoutSecond, '2026-11-06')?.ownBookingLines[0]?.bookingId, 'JS010');
+
+    const clash = addShiftEntry(draftFromSavedDay(loadDailyLogFromState(both, '2026-11-06')!, now), {
+      id: 'clash',
+      categoryId: 'ownBookings',
+      amount: '100.00',
+      recordedAt: now,
+      bookingId: 'JS001',
+    });
+    assert.throws(() => saveOpenedDay(both, clash), /finns redan/);
+    assert.equal(loadDailyLogFromState(both, '2026-11-05')?.ownBookingLines.length, 2);
+    assert.equal(loadDailyLogFromState(both, '2026-11-06')?.ownBookings, '500');
+  });
+
+  it('I rejects a historical correction aimed at another date and cannot create a day', () => {
+    const recordedAt = '2026-11-05T18:00:00.000Z';
+    const saved = saveDailyLogToState(emptyTaxiLogState(), {
+      date: '2026-11-05',
+      grossIncome: '800',
+      tips: '0',
+      workedHours: '8',
+      ownBookings: '800',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+      ownBookingLines: [{ bookingId: 'JS001', amount: '800', recordedAt }],
+    });
+    const opened = draftFromSavedDay(loadDailyLogFromState(saved, '2026-11-05')!, recordedAt);
+    const moved = setShiftStart(opened, stockholmInputToInstant('2026-11-06T10:00')!);
+    const planned = historicalCorrectionPlan(moved, recordedAt);
+    assert.equal(planned.ok, false);
+    assert.throws(
+      () => saveDailyLogToState(saved, {
+        date: '2026-11-06',
+        grossIncome: '800',
+        tips: '0',
+        workedHours: '8',
+        ownBookings: '800',
+        handUp: '0',
+        uberIncome: '0',
+        boltIncome: '0',
+        bonus: '0',
+        correctingDate: '2026-11-05',
+      }),
+      /Korrigeringen gäller 2026-11-05/,
+    );
+    assert.throws(
+      () => saveDailyLogToState(saved, {
+        date: '2026-11-07',
+        grossIncome: '100',
+        tips: '0',
+        workedHours: '1',
+        ownBookings: '100',
+        handUp: '0',
+        uberIncome: '0',
+        boltIncome: '0',
+        bonus: '0',
+        correctingDate: '2026-11-07',
+      }),
+      /kan inte skapa en ny dag/,
+    );
+    assert.equal(saved.workDays.length, 1);
+    assert.equal(loadDailyLogFromState(saved, '2026-11-06'), null);
+    assert.equal(loadDailyLogFromState(saved, '2026-11-07'), null);
+    const newer = saveOpenedDay(saved, updateShiftEntry(opened, 'booking-JS001', '900.00'));
+    assert.throws(() => saveOpenedDay(newer, opened), /ändrats sedan den öppnades/);
+    assert.equal(Number(loadDailyLogFromState(newer, '2026-11-05')?.ownBookings), 900);
+  });
+
+  it('J keeps the draft when loading or saving fails', () => {
+    const draft = addShiftEntry(setShiftStart(emptyTaxiShiftDraft(), '2026-11-05T07:00:00.000Z'), {
+      id: 'a',
+      categoryId: 'ownBookings',
+      amount: '850.00',
+      recordedAt: '2026-11-06T10:00:00.000Z',
+      bookingId: 'JS003',
+    });
+    const failedLoad = applySavedDayLoad(draft, { ok: false }, '2026-11-06T10:00:00.000Z');
+    assert.equal(failedLoad.opened, false);
+    assert.equal(failedLoad.draft, draft);
+    assert.match(failedLoad.error ?? '', /Ingenting ändrades/);
+    const missing = applySavedDayLoad(draft, { ok: true, day: null }, '2026-11-06T10:00:00.000Z');
+    assert.equal(missing.draft, draft);
+    assert.equal(missing.opened, false);
+    const failedSave = commitHistoricalCorrection(draft, { ok: false, message: 'Kunde inte spara ändringarna.' });
+    assert.equal(failedSave.saved, false);
+    assert.equal(failedSave.draft, draft);
+    assert.equal(failedSave.draft.entries[0]?.bookingId, 'JS003');
+    assert.equal(failedSave.draft.entries[0]?.amount, '850.00');
+    assert.equal(draftHasUnsavedWork(draft), true);
+  });
+
+  it('K clears correction mode when a new empty day starts', () => {
+    const opened = draftFromSavedDay({
+      date: '2026-11-05',
+      sourceCategorized: true,
+      ownBookings: '800',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      tips: '0',
+      bonus: '0',
+      workedHours: '8',
+      ownBookingLines: [{ bookingId: 'JS001', amount: '800.00', recordedAt: '2026-11-05T18:00:00.000Z' }],
+    }, '2026-11-06T10:00:00.000Z');
+    assert.equal(opened.correctingDate, '2026-11-05');
+    assert.equal(startNewShiftDraft(opened, '2026-11-06'), opened);
+    const fresh = beginEmptyShift('2026-11-06');
+    assert.equal(fresh.correctingDate, null);
+    assert.equal(fresh.historicalEditable, false);
+    assert.equal(fresh.entries.length, 0);
+    assert.equal(fresh.breaks.length, 0);
+    assert.equal(fresh.startedAt, null);
+    assert.equal(fresh.workDate, '2026-11-06');
+    assert.equal(opened.entries[0]?.bookingId, 'JS001');
+  });
+
+  it('L keeps an overnight shift on the start date after a historical correction', () => {
+    const startedAt = stockholmInputToInstant('2026-11-05T19:00');
+    const endedAt = stockholmInputToInstant('2026-11-06T04:00');
+    assert.ok(startedAt);
+    assert.ok(endedAt);
+    const first = saveDailyLogToState(emptyTaxiLogState(), {
+      date: '2026-11-05',
+      grossIncome: '400',
+      tips: '0',
+      workedHours: '9',
+      ownBookings: '400',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+      ownBookingLines: [{ bookingId: 'JS020', amount: '400', recordedAt: startedAt }],
+    });
+    const both = saveDailyLogToState(first, {
+      date: '2026-11-06',
+      grossIncome: '100',
+      tips: '0',
+      workedHours: '2',
+      ownBookings: '100',
+      handUp: '0',
+      uberIncome: '0',
+      boltIncome: '0',
+      bonus: '0',
+      ownBookingLines: [{ bookingId: 'JS021', amount: '100', recordedAt: endedAt }],
+    });
+    const opened = setShiftEnd(
+      setShiftStart(draftFromSavedDay(loadDailyLogFromState(both, '2026-11-05')!, endedAt), startedAt),
+      endedAt,
+    );
+    const planned = historicalCorrectionPlan(opened, endedAt);
+    assert.equal(planned.ok, true);
+    if (!planned.ok) return;
+    assert.equal(planned.plan.date, '2026-11-05');
+    assert.equal(planned.plan.workedHours, '9.00');
+    const saved = saveOpenedDay(both, opened);
+    assert.equal(loadDailyLogFromState(saved, '2026-11-05')?.date, '2026-11-05');
+    assert.equal(Number(loadDailyLogFromState(saved, '2026-11-05')?.workedHours), 9);
+    assert.equal(loadDailyLogFromState(saved, '2026-11-05')?.ownBookingLines[0]?.bookingId, 'JS020');
+    assert.equal(loadDailyLogFromState(saved, '2026-11-06')?.ownBookings, '100');
+    assert.equal(loadDailyLogFromState(saved, '2026-11-06')?.ownBookingLines[0]?.bookingId, 'JS021');
+  });
 });
+
+function saveOpenedDay(state: ReturnType<typeof emptyTaxiLogState>, draft: ReturnType<typeof draftFromSavedDay>) {
+  const planned = historicalCorrectionPlan(draft, '2026-11-06T12:00:00.000Z');
+  if (!planned.ok) throw new Error(planned.reason);
+  const parsed = parseTaxiLogImport(planned.plan.text);
+  const lines = ownBookingLinesFromDraft(draft, planned.plan.date);
+  if (!lines.ok) throw new Error(lines.reason);
+  return saveDailyLogToState(state, {
+    date: parsed.date,
+    grossIncome: parsed.grossIncome,
+    tips: parsed.tips,
+    workedHours: parsed.workedHours,
+    ownBookings: parsed.ownBookings,
+    otherIncome: parsed.otherIncome,
+    handUp: parsed.handUp,
+    uberIncome: parsed.uberIncome,
+    boltIncome: parsed.boltIncome,
+    bonus: parsed.bonus,
+    correctingDate: planned.plan.date,
+    openedFingerprint: draft.openedFingerprint,
+    ownBookingLines: lines.lines,
+  });
+}
 
 function lockedPayroll(): TaxiPayrollRecord {
   return {

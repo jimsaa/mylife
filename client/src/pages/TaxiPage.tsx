@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { taxiLogApi } from '../api';
 import { TaxiIncomeChart } from '../components/taxi/TaxiIncomeChart';
 import { TrendChart } from '../components/charts/Charts';
@@ -20,7 +20,21 @@ import {
   nextYearMonth,
   previousYearMonth,
 } from '../lib/taxilogDisplay';
-import type { TaxiLogMonth } from '../types';
+import type { TaxiLogMonth, TaxiOwnBookingLine } from '../types';
+
+function moneyOre(value: string | null | undefined): number {
+  const normalized = (value ?? '0').trim().replace(',', '.');
+  const negative = normalized.startsWith('-');
+  const [whole, fraction = ''] = normalized.replace('-', '').split('.');
+  const cents = Number(whole || '0') * 100 + Number((fraction + '00').slice(0, 2));
+  return negative ? -cents : cents;
+}
+
+function moneyFromOre(cents: number): string {
+  const sign = cents < 0 ? '-' : '';
+  const absolute = Math.abs(cents);
+  return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`;
+}
 
 function currentYearMonth() {
   const now = new Date();
@@ -29,15 +43,25 @@ function currentYearMonth() {
 
 export function TaxiPage() {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const fallback = currentYearMonth();
   const year = Number(params.get('year')) || fallback.year;
   const month = Number(params.get('month')) || fallback.month;
   const selectedDate = params.get('date');
   const [overview, setOverview] = useState<TaxiLogMonth | null>(null);
   const [exportText, setExportText] = useState<string | null>(null);
+  const [savedDay, setSavedDay] = useState<TaxiLogMonth['days'][number] | null>(null);
+  const [lineEdits, setLineEdits] = useState<TaxiOwnBookingLine[]>([]);
+  const [bookingQuery, setBookingQuery] = useState('');
+  const [bookingMatch, setBookingMatch] = useState<TaxiOwnBookingLine | null | undefined>(undefined);
+  const [bookingSearchError, setBookingSearchError] = useState('');
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const [reportNotice, setReportNotice] = useState('');
+  const [reviseOpen, setReviseOpen] = useState(false);
+  const [reviseDate, setReviseDate] = useState('');
+  const [reviseError, setReviseError] = useState('');
+  const [revisePending, setRevisePending] = useState(false);
   const [savingsForm, setSavingsForm] = useState({
     date: `${year}-${String(month).padStart(2, '0')}-01`,
     amount: '',
@@ -70,8 +94,16 @@ export function TaxiPage() {
     }
     taxiLogApi
       .day(selectedDate)
-      .then((result) => setExportText(result.exportText))
-      .catch(() => setExportText(null));
+      .then((result) => {
+        setExportText(result.exportText);
+        setSavedDay(result.day);
+        setLineEdits(result.day?.ownBookingLines ?? []);
+      })
+      .catch(() => {
+        setExportText(null);
+        setSavedDay(null);
+        setLineEdits([]);
+      });
   }, [selectedDate]);
 
   const reportDate = useMemo(() => {
@@ -113,6 +145,76 @@ export function TaxiPage() {
     value: Number(point.balance),
   }));
 
+  const searchBooking = async () => {
+    const bookingId = bookingQuery.trim();
+    if (!bookingId) return;
+    setBookingSearchError('');
+    try {
+      const result = await taxiLogApi.findBooking(bookingId);
+      setBookingMatch(result.match);
+    } catch (err) {
+      setBookingMatch(undefined);
+      setBookingSearchError(err instanceof Error ? err.message : 'Sökningen misslyckades.');
+    }
+  };
+
+  const saveBookingLines = async () => {
+    if (!savedDay || !selectedDate || pending) return;
+    if (!window.confirm(`Spara ändringarna på ${selectedDate}? Det ersätter den sparade dagen.`)) return;
+    setPending(true);
+    setError('');
+    try {
+      const original = (savedDay.ownBookingLines ?? []).filter((line) => line.driverId == null);
+      const primary = lineEdits.filter((line) => line.driverId == null).map((line) => ({
+        ...line,
+        date: selectedDate,
+        amount: moneyFromOre(moneyOre(line.amount)),
+      }));
+      const delta = primary.reduce((sum, line) => sum + moneyOre(line.amount), 0) - original.reduce((sum, line) => sum + moneyOre(line.amount), 0);
+      await taxiLogApi.saveDay({
+        date: selectedDate,
+        grossIncome: delta === 0 ? savedDay.grossIncome : moneyFromOre(moneyOre(savedDay.grossIncome) + delta),
+        tips: savedDay.tips,
+        workedHours: savedDay.workedHours,
+        ownBookings: delta === 0 ? savedDay.ownBookings : moneyFromOre(moneyOre(savedDay.ownBookings) + delta),
+        otherIncome: savedDay.otherIncome,
+        handUp: savedDay.handUp,
+        uberIncome: savedDay.uberIncome,
+        boltIncome: savedDay.boltIncome,
+        bonus: savedDay.bonus,
+        driverId: null,
+        correctingDate: selectedDate,
+        ownBookingLines: primary,
+      });
+      const drivers = [...new Set(lineEdits.map((line) => line.driverId).filter((driverId): driverId is string => Boolean(driverId)))];
+      for (const driverId of drivers) {
+        await taxiLogApi.saveDay({
+          date: selectedDate,
+          grossIncome: savedDay.grossIncome,
+          tips: savedDay.tips,
+          workedHours: savedDay.workedHours,
+          ownBookings: savedDay.ownBookings,
+          driverId,
+          correctingDate: selectedDate,
+          ownBookingLines: lineEdits.filter((line) => line.driverId === driverId).map((line) => ({
+            ...line,
+            date: selectedDate,
+            amount: moneyFromOre(moneyOre(line.amount)),
+          })),
+        });
+      }
+      const refreshed = await taxiLogApi.day(selectedDate);
+      setSavedDay(refreshed.day);
+      setLineEdits(refreshed.day?.ownBookingLines ?? []);
+      setExportText(refreshed.exportText);
+      await loadMonth();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bokningarna kunde inte sparas.');
+    } finally {
+      setPending(false);
+    }
+  };
+
   const goToMonth = (nextYear: number, nextMonth: number) => {
     const nextParams = new URLSearchParams();
     nextParams.set('year', String(nextYear));
@@ -147,6 +249,9 @@ export function TaxiPage() {
             >
               SKICKA RAPPORT TILL TOBBE
             </Button>
+            <Button type="button" variant="secondary" onClick={() => { setReviseOpen((open) => !open); setReviseError(''); }}>
+              ÄNDRA DAG
+            </Button>
             <Link to="/admin/taxi/rapport">
               <Button>MANUELL DAGSREGISTRERING</Button>
             </Link>
@@ -156,6 +261,73 @@ export function TaxiPage() {
           </div>
         }
       />
+
+      {reviseOpen ? (
+        <Card title="Ändra sparad dag" className="mb-6">
+          <p className="mb-3 text-sm text-text-muted">Välj ett datum som redan finns i TaxiLog. Ingenting ändras förrän dagen har hämtats.</p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <Field label="Datum">
+              <Input type="date" value={reviseDate} onChange={(event) => setReviseDate(event.target.value)} aria-label="Datum att korrigera" />
+            </Field>
+            <Button
+              type="button"
+              disabled={revisePending}
+              onClick={() => {
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(reviseDate)) {
+                  setReviseError('Välj ett datum.');
+                  return;
+                }
+                setRevisePending(true);
+                setReviseError('');
+                void taxiLogApi.day(reviseDate)
+                  .then((result) => {
+                    if (!result.day) {
+                      setReviseError(`Datumet ${reviseDate} har ingen sparad dag. Ingenting ändrades.`);
+                      return;
+                    }
+                    navigate('/admin/taxi/rapport', { state: { correctDay: result.day } });
+                  })
+                  .catch((err: Error) => {
+                    setReviseError(err.message || 'Kunde inte hämta dagen. Ingenting ändrades.');
+                  })
+                  .finally(() => setRevisePending(false));
+              }}
+            >
+              {revisePending ? 'Hämtar...' : 'Hämta sparad dag'}
+            </Button>
+          </div>
+          {reviseError ? <p className="mt-3 text-sm text-red-600" role="alert">{reviseError}</p> : null}
+        </Card>
+      ) : null}
+
+      <Card title="Sök boknings-ID" className="mb-6">
+        <form
+          className="flex flex-col gap-2 sm:flex-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void searchBooking();
+          }}
+        >
+          <Input
+            value={bookingQuery}
+            onChange={(event) => setBookingQuery(event.target.value)}
+            placeholder="JS001"
+            aria-label="Boknings-ID"
+          />
+          <Button type="submit" variant="secondary">Sök</Button>
+        </form>
+        {bookingSearchError ? <p className="mt-2 text-sm text-red-600">{bookingSearchError}</p> : null}
+        {bookingMatch === null ? <p className="mt-2 text-sm text-text-muted">Ingen bokning med det ID:t.</p> : null}
+        {bookingMatch ? (
+          <div className="mt-3 text-sm text-text">
+            <p>Boknings-ID: {bookingMatch.bookingId}</p>
+            <p>Belopp: {formatSek(bookingMatch.amount)}</p>
+            <p>Kördatum: {formatDateTitleSv(bookingMatch.date)}</p>
+            <p>Chaufför: {bookingMatch.driverId ?? 'Inte angiven'}</p>
+            <p>Arbetsdag: {formatDateTitleSv(bookingMatch.date)}</p>
+          </div>
+        ) : null}
+      </Card>
 
       {error ? <p className="mb-4 text-sm text-red-600">{error}</p> : null}
       {reportNotice ? <p className="mb-4 text-sm text-emerald-700">{reportNotice}</p> : null}
@@ -259,6 +431,40 @@ export function TaxiPage() {
                 <StatCard label="DRICKS" value={formatSek(selectedDay?.tips ?? '0')} />
                 <StatCard label="TOTAL INKOMST" value={formatSek(selectedDay?.totalIncome ?? selectedDay?.grossIncome ?? '0')} />
                 <StatCard label="ARBETAD TID" value={formatHoursValue(selectedDay?.workedHours ?? '0')} />
+              </div>
+              <div className="mt-4 space-y-2">
+                <p className="text-sm font-medium text-text">Individuella bokningar</p>
+                {lineEdits.length === 0 ? <p className="text-sm text-text-muted">Inga individuella bokningar sparade för dagen.</p> : null}
+                {lineEdits.map((line, index) => (
+                  <div key={`${line.bookingId}-${index}`} className="grid gap-2 sm:grid-cols-[1fr_8rem_1fr]">
+                    <Input
+                      aria-label={`Boknings-ID ${index + 1}`}
+                      value={line.bookingId}
+                      onChange={(event) =>
+                        setLineEdits((current) => current.map((item, itemIndex) => (
+                          itemIndex === index ? { ...item, bookingId: event.target.value } : item
+                        )))
+                      }
+                    />
+                    <Input
+                      aria-label={`Belopp ${index + 1}`}
+                      value={line.amount}
+                      onChange={(event) =>
+                        setLineEdits((current) => current.map((item, itemIndex) => (
+                          itemIndex === index ? { ...item, amount: event.target.value } : item
+                        )))
+                      }
+                    />
+                    <p className="self-center text-sm text-text-muted">
+                      Chaufför: {line.driverId ?? 'Inte angiven'}
+                    </p>
+                  </div>
+                ))}
+                {lineEdits.length > 0 ? (
+                  <Button type="button" variant="secondary" disabled={pending} onClick={() => void saveBookingLines()}>
+                    Spara bokningar
+                  </Button>
+                ) : null}
               </div>
               {exportText ? (
                 <div className="mt-4">

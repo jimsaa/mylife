@@ -153,7 +153,9 @@ CHARGING_KWH=10
 END_TAXILOG_IMPORT`);
 
   const afterFirst = saveDailyLogToState(emptyTaxiLogState(), first);
-  const afterSecond = saveDailyLogToState(afterFirst, second);
+  assert.throws(() => saveDailyLogToState(afterFirst, second), /redan sparat/);
+  assert.equal(afterFirst.workDays[0]?.totalIncome, "1214.00");
+  const afterSecond = saveDailyLogToState(afterFirst, { ...second, correctingDate: second.date });
   const month = loadMonthOverviewFromState(afterSecond, 2026, 9);
 
   assert.equal(afterSecond.workDays.length, 1);
@@ -290,7 +292,8 @@ WORKED_HOURS=8
 CHARGING_KWH=0
 END_TAXILOG_IMPORT`);
   const once = saveDailyLogToState(emptyTaxiLogState(), parsed);
-  const twice = saveDailyLogToState(once, parsed);
+  assert.throws(() => saveDailyLogToState(once, parsed), /redan sparat/);
+  const twice = saveDailyLogToState(once, { ...parsed, correctingDate: parsed.date });
   const month = loadMonthOverviewFromState(twice, 2026, 11);
   assert.equal(twice.workDays.length, 1);
   assert.equal(month.grossIncome, "1000");
@@ -480,7 +483,8 @@ test("VERSION=3 duplicate import updates the same day and savings keys", () => {
   const first = parseTaxiLogImport(V3_DAY);
   const second = parseTaxiLogImport(V3_DAY.replace("BONUS=200", "BONUS=50").replace("TIPS=100", "TIPS=25"));
   const once = saveDailyLogToState(emptyTaxiLogState(), first);
-  const twice = saveDailyLogToState(once, second);
+  assert.throws(() => saveDailyLogToState(once, second), /redan sparat/);
+  const twice = saveDailyLogToState(once, { ...second, correctingDate: second.date });
   const month = loadMonthOverviewFromState(twice, 2026, 11);
   assert.equal(twice.workDays.length, 1);
   assert.equal(month.grossIncome, "3500");
@@ -512,7 +516,7 @@ TIPS=0
 WORKED_HOURS=1
 CHARGING_KWH=22.5
 END_TAXILOG_IMPORT`));
-  const updated = saveDailyLogToState(withCharge, parseTaxiLogImport(V3_DAY));
+  const updated = saveDailyLogToState(withCharge, { ...parseTaxiLogImport(V3_DAY), correctingDate: "2026-11-03" });
   const loaded = loadDailyLogFromState(updated, "2026-11-03");
   assert.equal(loaded?.chargingKwh, "22.5");
   assert.equal(loaded?.grossIncome, "3500.00");

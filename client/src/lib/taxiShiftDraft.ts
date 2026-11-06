@@ -16,7 +16,7 @@ export type TaxiShiftEntry = {
   categoryId: TaxiShiftCategoryId;
   amount: string;
   recordedAt: string;
-  bookingIds?: string;
+  bookingId?: string;
 };
 
 export type TaxiShiftBreak = {
@@ -33,6 +33,11 @@ export type TaxiShiftDraft = {
   breaks: TaxiShiftBreak[];
   closedAt: string | null;
   closedDate: string | null;
+  correctingDate: string | null;
+  workDate: string | null;
+  loadedWorkedHours: string | null;
+  historicalEditable: boolean;
+  openedFingerprint: string | null;
 };
 
 export type ReportedWorkTime = {
@@ -49,7 +54,20 @@ type KeyValueStorage = {
 const CATEGORY_IDS = new Set<string>(TAXI_SHIFT_CATEGORIES.map((category) => category.id));
 
 export function emptyTaxiShiftDraft(): TaxiShiftDraft {
-  return { version: 1, startedAt: null, endedAt: null, entries: [], breaks: [], closedAt: null, closedDate: null };
+  return {
+    version: 1,
+    startedAt: null,
+    endedAt: null,
+    entries: [],
+    breaks: [],
+    closedAt: null,
+    closedDate: null,
+    correctingDate: null,
+    workDate: null,
+    loadedWorkedHours: null,
+    historicalEditable: false,
+    openedFingerprint: null,
+  };
 }
 
 export function parseShiftAmount(raw: string): string | null {
@@ -255,12 +273,198 @@ export function planShiftClose(
   return { ok: true, plan: { date, text, workedHours } };
 }
 
+export type SavedShiftDay = {
+  date: string;
+  grossIncome?: string | null;
+  ownBookings?: string | null;
+  handUp?: string | null;
+  uberIncome?: string | null;
+  boltIncome?: string | null;
+  tips?: string | null;
+  bonus?: string | null;
+  workedHours?: string | null;
+  sourceCategorized?: boolean;
+  ownBookingLines?: Array<{ bookingId: string; amount: string; recordedAt?: string; driverId?: string | null }>;
+  corrections?: Array<{ correctedAt: string; changes: { field: string; before: string; after: string }[] }>;
+  fingerprint?: string;
+};
+
+export function draftFromSavedDay(day: SavedShiftDay, nowIso: string): TaxiShiftDraft {
+  const categorized = day.sourceCategorized === true;
+  const entries: TaxiShiftEntry[] = [];
+  if (categorized) {
+    const lines = (day.ownBookingLines ?? []).filter((line) => line.driverId == null);
+    let lineOre = 0;
+    for (const line of lines) {
+      const amount = parseShiftAmount(line.amount);
+      if (!amount || !line.bookingId) continue;
+      lineOre += toOre(amount);
+      entries.push({
+        id: `booking-${line.bookingId}`,
+        categoryId: 'ownBookings',
+        amount,
+        recordedAt: line.recordedAt || nowIso,
+        bookingId: line.bookingId,
+      });
+    }
+    const target = toOre(parseShiftAmount(day.ownBookings ?? '0') ?? '0.00');
+    if (target !== lineOre) {
+      entries.push({
+        id: 'own-unspecified',
+        categoryId: 'ownBookings',
+        amount: fromOre(target - lineOre),
+        recordedAt: nowIso,
+      });
+    }
+    const categories: Array<[TaxiShiftCategoryId, string | null | undefined]> = [
+      ['uberIncome', day.uberIncome],
+      ['boltIncome', day.boltIncome],
+      ['handUp', day.handUp],
+      ['tips', day.tips],
+      ['bonus', day.bonus],
+    ];
+    for (const [categoryId, value] of categories) {
+      const amount = parseShiftAmount(value ?? '0');
+      if (!amount || toOre(amount) === 0) continue;
+      entries.push({
+        id: `saved-${categoryId}`,
+        categoryId,
+        amount,
+        recordedAt: nowIso,
+      });
+    }
+  }
+  return {
+    ...emptyTaxiShiftDraft(),
+    entries,
+    correctingDate: day.date,
+    workDate: day.date,
+    loadedWorkedHours: day.workedHours ?? null,
+    historicalEditable: categorized,
+    openedFingerprint: day.fingerprint ?? null,
+  };
+}
+
+export function applySavedDayLoad(
+  draft: TaxiShiftDraft,
+  result: { ok: false } | { ok: true; day: SavedShiftDay | null },
+  nowIso: string,
+): { draft: TaxiShiftDraft; opened: boolean; error: string | null } {
+  if (!result.ok) {
+    return { draft, opened: false, error: 'Kunde inte hämta dagen. Ingenting ändrades.' };
+  }
+  if (!result.day) {
+    return { draft, opened: false, error: 'Datumet har ingen sparad dag. Ingenting ändrades.' };
+  }
+  return { draft: draftFromSavedDay(result.day, nowIso), opened: true, error: null };
+}
+
+export function historicalCorrectionPlan(
+  draft: TaxiShiftDraft,
+  nowIso: string,
+): { ok: true; plan: ShiftClosePlan } | { ok: false; reason: string } {
+  if (!draft.correctingDate) return { ok: false, reason: 'Ingen sparad dag är öppnad.' };
+  if (!draft.historicalEditable) {
+    return { ok: false, reason: 'Dagen är inte uppdelad på de sex intäktskällorna och kan inte ändras här.' };
+  }
+  const date = draft.correctingDate;
+  if (draft.startedAt) {
+    const startDate = stockholmCalendarDate(draft.startedAt);
+    if (startDate !== date) {
+      return { ok: false, reason: `Korrigeringen gäller ${date} och kan inte sparas på ${startDate}.` };
+    }
+  }
+  let workedHours = draft.loadedWorkedHours && draft.loadedWorkedHours.trim() ? draft.loadedWorkedHours : '0.00';
+  if (draft.startedAt && draft.endedAt) {
+    const reported = calculateReportedWork(draft, nowIso);
+    if (reported.shiftMs <= 0) return { ok: false, reason: 'Sluttiden måste vara efter starttiden.' };
+    workedHours = reportedHoursValue(reported.reportedMs);
+  }
+  const negative = TAXI_SHIFT_CATEGORIES.find((category) => categorySum(draft, category.id).startsWith('-'));
+  if (negative) return { ok: false, reason: `${negative.label} kan inte vara negativ när dagen sparas.` };
+  const amount = (field: string, categoryId: TaxiShiftCategoryId) => `${field}=${categorySum(draft, categoryId)}`;
+  const text = [
+    'TAXILOG_IMPORT',
+    'VERSION=3',
+    `DATE=${date}`,
+    '',
+    amount('OWN_BOOKINGS', 'ownBookings'),
+    amount('HAND_UP', 'handUp'),
+    amount('UBER_INCOME', 'uberIncome'),
+    amount('BOLT_INCOME', 'boltIncome'),
+    '',
+    amount('BONUS', 'bonus'),
+    amount('TIPS', 'tips'),
+    '',
+    `WORKED_HOURS=${workedHours}`,
+    '',
+    'END_TAXILOG_IMPORT',
+  ].join('\n');
+  return { ok: true, plan: { date, text, workedHours } };
+}
+
+export function commitHistoricalCorrection(
+  draft: TaxiShiftDraft,
+  result: { ok: false; message: string } | { ok: true },
+): { draft: TaxiShiftDraft; saved: boolean; error: string | null } {
+  if (!result.ok) return { draft, saved: false, error: result.message };
+  return { draft, saved: true, error: null };
+}
+
 export function markShiftClosed(draft: TaxiShiftDraft, closedAt: string, closedDate: string): TaxiShiftDraft {
   return { ...draft, closedAt, closedDate };
 }
 
 export function reopenShiftForCorrection(draft: TaxiShiftDraft): TaxiShiftDraft {
-  return { ...draft, closedAt: null, closedDate: null };
+  return { ...draft, closedAt: null, closedDate: null, correctingDate: draft.closedDate };
+}
+
+export function startNewShiftDraft(draft: TaxiShiftDraft, today: string): TaxiShiftDraft {
+  if (!draft.closedAt) return draft;
+  return beginEmptyShift(today);
+}
+
+export function beginEmptyShift(today: string): TaxiShiftDraft {
+  return { ...emptyTaxiShiftDraft(), workDate: today };
+}
+
+export function draftHasUnsavedWork(draft: TaxiShiftDraft): boolean {
+  if (draft.closedAt) return false;
+  return Boolean(draft.startedAt || draft.endedAt || draft.entries.length > 0 || draft.breaks.length > 0 || draft.correctingDate);
+}
+
+export function savedDateBlock(date: string, alreadySaved: boolean, correctingDate: string | null): string | null {
+  if (correctingDate && correctingDate !== date) {
+    return `Korrigeringen gäller ${correctingDate} och kan inte sparas på ${date}.`;
+  }
+  if (!alreadySaved || correctingDate === date) return null;
+  return `Datumet ${date} är redan sparat. Historiken skrivs inte över. Välj Korrigera dagen om den dagen ska ändras.`;
+}
+
+export type ShiftSaveCheck =
+  | { status: 'unavailable' }
+  | { status: 'locked' }
+  | { status: 'ready'; date: string; alreadySaved: boolean; correctingDate: string | null };
+
+export function decideShiftSave(check: ShiftSaveCheck): { allowSave: boolean; message: string | null } {
+  if (check.status === 'unavailable') {
+    return {
+      allowSave: false,
+      message: 'Kunde inte kontrollera om dagen redan är sparad. Ingenting sparades. Försök igen.',
+    };
+  }
+  if (check.status === 'locked') {
+    return {
+      allowSave: false,
+      message: 'Månaden är låst. Lås upp med en uttrycklig korrigering innan du ändrar.',
+    };
+  }
+  const block = savedDateBlock(check.date, check.alreadySaved, check.correctingDate);
+  if (block) return { allowSave: false, message: block };
+  if (check.alreadySaved) {
+    return { allowSave: true, message: `Datumet ${check.date} korrigeras. Sparning ersätter den sparade dagen.` };
+  }
+  return { allowSave: true, message: null };
 }
 
 export function formatWorkDuration(ms: number): string {
@@ -271,6 +475,10 @@ export function formatWorkDuration(ms: number): string {
   if (hours === 0) return `${minutes} min`;
   if (minutes === 0) return `${hours} h`;
   return `${hours} h ${minutes} min`;
+}
+
+export function stockholmCalendarDate(iso: string): string {
+  return instantToStockholmInput(iso).slice(0, 10);
 }
 
 export function instantToStockholmInput(iso: string): string {
@@ -313,11 +521,57 @@ export function stockholmInputToInstant(value: string): string | null {
   return new Date(wallClock - offset * 60_000).toISOString();
 }
 
-export function parseBookingIds(raw: string): string | null {
-  const ids = raw.split(',').map((part) => part.trim()).filter(Boolean);
-  if (ids.length === 0) return null;
-  if (ids.length > 20 || ids.some((id) => !/^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/.test(id))) return null;
-  return ids.join(', ');
+const BOOKING_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
+
+export function parseBookingId(raw: string): string | null {
+  const id = raw.trim();
+  if (!BOOKING_ID.test(id)) return null;
+  return id;
+}
+
+export function ownBookingLinesFromDraft(draft: TaxiShiftDraft, date: string) {
+  const lines = draft.entries.flatMap((entry) => {
+    if (entry.categoryId !== 'ownBookings' || !entry.bookingId) return [];
+    return [{
+      bookingId: entry.bookingId,
+      amount: entry.amount,
+      date,
+      driverId: null,
+      recordedAt: entry.recordedAt,
+    }];
+  });
+  const seen = new Set<string>();
+  for (const line of lines) {
+    if (seen.has(line.bookingId)) return { ok: false as const, reason: `Boknings-ID ${line.bookingId} finns två gånger.` };
+    seen.add(line.bookingId);
+  }
+  return { ok: true as const, lines };
+}
+
+export function withServerBookingLines(
+  draft: TaxiShiftDraft,
+  lines: Array<{ bookingId: string; amount: string; recordedAt: string }>,
+): TaxiShiftDraft {
+  const entries = draft.entries.filter((entry) => entry.categoryId !== 'ownBookings' || !entry.bookingId);
+  for (const line of lines) {
+    const amount = parseShiftAmount(line.amount) ?? line.amount;
+    entries.push({
+      id: `booking-${line.bookingId}`,
+      categoryId: 'ownBookings',
+      amount,
+      recordedAt: line.recordedAt,
+      bookingId: line.bookingId,
+    });
+  }
+  return { ...draft, entries };
+}
+
+export function finishShiftClose(
+  draft: TaxiShiftDraft,
+  result: { ok: false } | { ok: true; savedAt: string; date: string },
+): TaxiShiftDraft {
+  if (!result.ok) return draft;
+  return markShiftClosed(draft, result.savedAt, result.date);
 }
 
 export function addShiftEntry(
@@ -331,7 +585,7 @@ export function updateShiftEntry(
   draft: TaxiShiftDraft,
   entryId: string,
   amount: string,
-  bookingIds?: string | null,
+  bookingId?: string | null,
 ): TaxiShiftDraft {
   return {
     ...draft,
@@ -340,7 +594,7 @@ export function updateShiftEntry(
       return entryWithBookingIds({
         ...entry,
         amount,
-        bookingIds: bookingIds === undefined ? entry.bookingIds : bookingIds ?? undefined,
+        bookingId: bookingId === undefined ? entry.bookingId : bookingId ?? undefined,
       });
     }),
   };
@@ -377,6 +631,11 @@ function normalizeDraft(value: unknown): TaxiShiftDraft {
     breaks,
     closedAt: typeof record.closedAt === 'string' && record.closedAt ? record.closedAt : null,
     closedDate: typeof record.closedDate === 'string' && record.closedDate ? record.closedDate : null,
+    correctingDate: typeof record.correctingDate === 'string' && record.correctingDate ? record.correctingDate : null,
+    workDate: typeof record.workDate === 'string' && record.workDate ? record.workDate : null,
+    loadedWorkedHours: typeof record.loadedWorkedHours === 'string' && record.loadedWorkedHours ? record.loadedWorkedHours : null,
+    historicalEditable: record.historicalEditable === true,
+    openedFingerprint: typeof record.openedFingerprint === 'string' && record.openedFingerprint ? record.openedFingerprint : null,
   };
 }
 
@@ -393,7 +652,7 @@ function normalizeEntry(value: unknown): TaxiShiftEntry[] {
       categoryId: entry.categoryId as TaxiShiftCategoryId,
       amount: entry.amount,
       recordedAt: entry.recordedAt,
-      bookingIds: typeof entry.bookingIds === 'string' ? entry.bookingIds : undefined,
+      bookingId: bookingIdFromLegacy(entry),
     }),
   ];
 }
@@ -405,9 +664,15 @@ function entryWithBookingIds(entry: TaxiShiftEntry): TaxiShiftEntry {
     amount: entry.amount,
     recordedAt: entry.recordedAt,
   };
-  if (entry.categoryId !== 'ownBookings' || !entry.bookingIds) return next;
-  const bookingIds = parseBookingIds(entry.bookingIds);
-  return bookingIds ? { ...next, bookingIds } : next;
+  if (entry.categoryId !== 'ownBookings' || !entry.bookingId) return next;
+  const bookingId = parseBookingId(entry.bookingId);
+  return bookingId ? { ...next, bookingId } : next;
+}
+
+function bookingIdFromLegacy(entry: Partial<TaxiShiftEntry> & { bookingIds?: string }): string | undefined {
+  if (typeof entry.bookingId === 'string') return entry.bookingId;
+  if (typeof entry.bookingIds !== 'string' || entry.bookingIds.includes(',')) return undefined;
+  return entry.bookingIds;
 }
 
 function closeOpenBreaks(breaks: TaxiShiftBreak[], endedAt: string): TaxiShiftBreak[] {

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { taxiLogApi } from '../api';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
-import { formatSek } from '../lib/taxilogDisplay';
+import { formatDateTitleSv, formatHoursValue, formatSek } from '../lib/taxilogDisplay';
 import {
   addBreak,
   addShiftEntry,
+  applySavedDayLoad,
+  beginEmptyShift,
   calculateReportedWork,
   cashTotal,
   categorySharePercent,
@@ -16,20 +19,28 @@ import {
   formatWorkDuration,
   hasOpenBreak,
   instantToStockholmInput,
+  finishShiftClose,
   loadTaxiShiftDraft,
-  markShiftClosed,
+  ownBookingLinesFromDraft,
+  parseBookingId,
   normalizeStockholmDate,
   normalizeStockholmTime,
   stockholmFieldsToInstant,
-  parseBookingIds,
   parseShiftAmount,
+  commitHistoricalCorrection,
+  decideShiftSave,
+  draftHasUnsavedWork,
+  historicalCorrectionPlan,
   planShiftClose,
   removeBreak,
   removeShiftEntry,
   reopenShiftForCorrection,
+  withServerBookingLines,
   resumeBreak,
   saveTaxiShiftDraft,
+  stockholmCalendarDate,
   setShiftEnd,
+  startNewShiftDraft,
   setShiftStart,
   startBreak,
   startShift,
@@ -39,6 +50,7 @@ import {
   type ShiftAmountKey,
   type ShiftClosePlan,
   type TaxiShiftCategoryId,
+  type SavedShiftDay,
   type TaxiShiftDraft,
   type TaxiShiftEntry,
 } from '../lib/taxiShiftDraft';
@@ -72,9 +84,9 @@ function displayAmount(value: string): string {
   return value.replace('-', '−');
 }
 
-function ownBookingLine(amount: string, bookingIds?: string): string {
+function ownBookingLine(amount: string, bookingId?: string): string {
   const driven = `Inkört: ${formatSek(amount)}`;
-  return bookingIds ? `${driven} [${bookingIds}]` : driven;
+  return bookingId ? `${driven} [${bookingId}]` : driven;
 }
 
 type AmountPadKey = ShiftAmountKey | 'save';
@@ -120,6 +132,16 @@ export function TaxiShiftReportPage() {
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
   const closeToken = useRef(0);
+  const [historyDate, setHistoryDate] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyMessage, setHistoryMessage] = useState<string | null>(null);
+  const [historyPending, setHistoryPending] = useState(false);
+  const [historyLog, setHistoryLog] = useState<SavedShiftDay['corrections']>([]);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const incomingDay = (location.state as { correctDay?: SavedShiftDay } | null)?.correctDay;
+  const consumedDay = useRef<string | null>(null);
 
   useEffect(() => {
     setDraft(loadTaxiShiftDraft(window.localStorage));
@@ -129,6 +151,30 @@ export function TaxiShiftReportPage() {
     if (!draft) return;
     saveTaxiShiftDraft(window.localStorage, draft);
   }, [draft]);
+
+  useEffect(() => {
+    if (!incomingDay || !draft) return;
+    const key = `${incomingDay.date}:${incomingDay.workedHours ?? ''}:${incomingDay.ownBookingLines?.length ?? 0}`;
+    if (consumedDay.current === key) return;
+    consumedDay.current = key;
+    if (draftHasUnsavedWork(draft)) {
+      setHistoryError('Det finns ett osparat utkast. Ingenting byttes ut.');
+    } else {
+      const opened = applySavedDayLoad(draft, { ok: true, day: incomingDay }, new Date().toISOString());
+      if (opened.opened) {
+        setTimeParts({});
+        setClosePlan(null);
+        setCloseError(null);
+        setHistoryError(null);
+        setHistoryMessage(null);
+        setHistoryLog(incomingDay.corrections ?? []);
+        setDraft(opened.draft);
+      } else if (opened.error) {
+        setHistoryError(opened.error);
+      }
+    }
+    navigate('/admin/taxi/rapport', { replace: true, state: null });
+  }, [incomingDay, draft, navigate]);
 
   useEffect(() => {
     if (!draft?.startedAt || draft.endedAt) return;
@@ -143,15 +189,102 @@ export function TaxiShiftReportPage() {
   const started = draft.startedAt != null;
   const ended = draft.endedAt != null;
   const sealed = draft.closedAt != null;
+  const correcting = draft.historicalEditable && Boolean(draft.correctingDate) && !sealed;
   const breakOpen = started && !ended && hasOpenBreak(draft);
   const work = calculateReportedWork(draft, now);
   const canClose = started && ended && work.shiftMs > 0;
 
-  const openEditor = (next: EditorState, currentAmount = '', bookingIds = '') => {
+  const loadHistoricalDay = async () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(historyDate)) {
+      setHistoryError('Välj ett datum.');
+      return;
+    }
+    if (draftHasUnsavedWork(draft) && !window.confirm('Osparade ändringar i utkastet används inte. Den sparade dagen i TaxiLog ändras inte. Fortsätta?')) {
+      return;
+    }
+    setHistoryPending(true);
+    setHistoryError(null);
+    setHistoryMessage(null);
+    try {
+      const result = await taxiLogApi.day(historyDate);
+      const opened = applySavedDayLoad(draft, { ok: true, day: result.day }, new Date().toISOString());
+      if (!opened.opened) {
+        setHistoryError(opened.error ?? `Datumet ${historyDate} har ingen sparad dag. Ingenting ändrades.`);
+        return;
+      }
+      setTimeParts({});
+      setClosePlan(null);
+      setCloseError(null);
+      setHistoryLog(result.day?.corrections ?? []);
+      setDraft(opened.draft);
+    } catch {
+      const failed = applySavedDayLoad(draft, { ok: false }, new Date().toISOString());
+      setHistoryError(failed.error);
+    } finally {
+      setHistoryPending(false);
+    }
+  };
+
+  const saveHistorical = async () => {
+    if (!correcting || closingRef.current) return;
+    const planned = historicalCorrectionPlan(draft, new Date().toISOString());
+    if (!planned.ok) {
+      setHistoryMessage(null);
+      setCloseError(planned.reason);
+      return;
+    }
+    if (planned.plan.date !== draft.correctingDate) {
+      setHistoryMessage(null);
+      setCloseError(`Korrigeringen gäller ${draft.correctingDate} och kan inte sparas på ${planned.plan.date}.`);
+      return;
+    }
+    closingRef.current = true;
+    setClosing(true);
+    setCloseError(null);
+    const source = draft;
+    try {
+      const bookings = ownBookingLinesFromDraft(source, planned.plan.date);
+      if (!bookings.ok) throw new Error(bookings.reason);
+      const parsed = await taxiLogApi.parse(planned.plan.text);
+      if (parsed.parsed.date !== source.correctingDate) {
+        throw new Error('Importen fick ett annat datum. Ingenting sparades.');
+      }
+      const saved = await taxiLogApi.saveDay({
+        date: source.correctingDate ?? planned.plan.date,
+        grossIncome: parsed.parsed.grossIncome,
+        tips: parsed.parsed.tips,
+        workedHours: parsed.parsed.workedHours,
+        ownBookings: parsed.parsed.ownBookings,
+        otherIncome: parsed.parsed.otherIncome,
+        handUp: parsed.parsed.handUp,
+        uberIncome: parsed.parsed.uberIncome,
+        boltIncome: parsed.parsed.boltIncome,
+        bonus: parsed.parsed.bonus,
+        driverId: null,
+        correctingDate: source.correctingDate,
+        openedFingerprint: source.openedFingerprint,
+        ownBookingLines: bookings.lines,
+      });
+      const outcome = commitHistoricalCorrection(source, { ok: true });
+      if (!outcome.saved) throw new Error('Ändringarna sparades inte.');
+      setHistoryLog(saved.day?.corrections ?? []);
+      setHistoryMessage(`Ändringarna för ${formatDateTitleSv(source.correctingDate ?? planned.plan.date)} är sparade.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Ändringarna kunde inte sparas.';
+      const outcome = commitHistoricalCorrection(source, { ok: false, message });
+      setHistoryMessage(null);
+      setCloseError(outcome.error ?? message);
+    } finally {
+      closingRef.current = false;
+      setClosing(false);
+    }
+  };
+
+  const openEditor = (next: EditorState, currentAmount = '', bookingId = '') => {
     if (draft.closedAt) return;
     setEditor(next);
     setAmountInput(currentAmount);
-    setBookingIdInput(bookingIds);
+    setBookingIdInput(bookingId);
     setAmountError('');
   };
 
@@ -170,9 +303,9 @@ export function TaxiShiftReportPage() {
       return;
     }
     const categoryId = editor.mode === 'add' ? editor.categoryId : editor.entry.categoryId;
-    const bookingIds = categoryId === 'ownBookings' ? parseBookingIds(bookingIdInput) : null;
-    if (categoryId === 'ownBookings' && bookingIdInput.trim() && !bookingIds) {
-      setAmountError('Ange boknings-ID som JS001 eller JS001, JS002.');
+    const bookingId = categoryId === 'ownBookings' ? parseBookingId(bookingIdInput) : null;
+    if (categoryId === 'ownBookings' && bookingIdInput.trim() && !bookingId) {
+      setAmountError('Ange ett boknings-ID, till exempel JS001.');
       return;
     }
     setDraft((current) => {
@@ -183,10 +316,10 @@ export function TaxiShiftReportPage() {
           categoryId: editor.categoryId,
           amount,
           recordedAt: new Date().toISOString(),
-          ...(bookingIds ? { bookingIds } : {}),
+          ...(bookingId ? { bookingId } : {}),
         });
       }
-      return updateShiftEntry(current, editor.entry.id, amount, categoryId === 'ownBookings' ? bookingIds : undefined);
+      return updateShiftEntry(current, editor.entry.id, amount, categoryId === 'ownBookings' ? bookingId : undefined);
     });
     closeEditor();
   };
@@ -225,8 +358,10 @@ export function TaxiShiftReportPage() {
       .then(([existing, overview]) => {
         if (closeToken.current !== token) return;
         if (overview.settlementLocked) {
+          const decision = decideShiftSave({ status: 'locked' });
           setCloseBlocked(true);
-          setCloseNotice('Månaden är låst. Lås upp med en uttrycklig korrigering innan du ändrar.');
+          setCloseReady(false);
+          setCloseNotice(decision.message);
           return;
         }
         const day = existing.day;
@@ -242,14 +377,24 @@ export function TaxiShiftReportPage() {
               Number(day.workedHours) > 0 ||
               Number(day.tips) > 0),
         );
-        setCloseNotice(
-          registered ? `Datumet ${planned.plan.date} är redan registrerat. Sparning ersätter den dagen.` : null,
-        );
-        setCloseReady(true);
+        const decision = decideShiftSave({
+          status: 'ready',
+          date: planned.plan.date,
+          alreadySaved: registered,
+          correctingDate: draft.correctingDate,
+        });
+        setCloseBlocked(!decision.allowSave);
+        setCloseReady(decision.allowSave);
+        setCloseNotice(decision.allowSave ? decision.message : null);
+        setCloseError(decision.allowSave ? null : decision.message);
       })
       .catch(() => {
         if (closeToken.current !== token) return;
-        setCloseReady(true);
+        const decision = decideShiftSave({ status: 'unavailable' });
+        setCloseBlocked(true);
+        setCloseReady(false);
+        setCloseNotice(null);
+        setCloseError(decision.message);
       });
   };
 
@@ -261,6 +406,8 @@ export function TaxiShiftReportPage() {
     const plan = closePlan;
     const source = draft;
     try {
+      const bookings = ownBookingLinesFromDraft(source, plan.date);
+      if (!bookings.ok) throw new Error(bookings.reason);
       const parsed = await taxiLogApi.parse(plan.text);
       if (parsed.parsed.date !== plan.date) {
         throw new Error('Importen fick ett annat datum. Ingenting sparades.');
@@ -276,8 +423,11 @@ export function TaxiShiftReportPage() {
         uberIncome: parsed.parsed.uberIncome,
         boltIncome: parsed.parsed.boltIncome,
         bonus: parsed.parsed.bonus,
+        driverId: null,
+        correctingDate: source.correctingDate === plan.date ? plan.date : null,
+        ownBookingLines: bookings.lines,
       });
-      setDraft(markShiftClosed(source, new Date().toISOString(), parsed.parsed.date));
+      setDraft(finishShiftClose(source, { ok: true, savedAt: new Date().toISOString(), date: parsed.parsed.date }));
       closeToken.current += 1;
       setClosePlan(null);
       setCloseNotice(null);
@@ -298,7 +448,11 @@ export function TaxiShiftReportPage() {
     apply: (next: string | null) => void,
   ) => {
     if (draft.closedAt) return;
-    const base = timeParts[id] ?? splitStockholm(iso);
+    const shown = timeParts[id] ?? splitStockholm(iso);
+    const openDate = draft.historicalEditable && draft.correctingDate
+      ? draft.correctingDate
+      : stockholmCalendarDate(new Date().toISOString());
+    const base = id === 'shift-start' && !iso && !shown.date ? { date: openDate, time: '' } : shown;
     const next = {
       date: patch.date !== undefined ? normalizeStockholmDate(patch.date) : base.date,
       time: patch.time !== undefined ? normalizeStockholmTime(patch.time) : base.time,
@@ -322,18 +476,53 @@ export function TaxiShiftReportPage() {
     apply(instant);
   };
 
-  const timeValue = (id: string, iso: string | null) => timeParts[id] ?? splitStockholm(iso);
+  const timeValue = (id: string, iso: string | null) => {
+    const parts = timeParts[id] ?? splitStockholm(iso);
+    if (id === 'shift-start' && !iso && !parts.date) {
+      return { date: draft.historicalEditable && draft.correctingDate ? draft.correctingDate : stockholmCalendarDate(now), time: '' };
+    }
+    return parts;
+  };
 
   return (
     <div className="mx-auto w-full min-w-0 max-w-5xl" lang="sv-SE">
       <header className="mb-1">
         <h1 className="text-xl font-bold leading-tight text-text">Passrapport</h1>
         <p className="text-xs text-text-muted">
-          {sealed
-            ? `Dagen ${draft.closedDate ?? ''} är sparad. Inget mejl skickas.`
-            : 'Dagen sparas först när du bekräftar STÄNG DAG. Inget mejl skickas.'}
+          {correcting
+            ? `KORRIGERAR SPARAD DAG – ${formatDateTitleSv(draft.correctingDate ?? '').toUpperCase()}`
+            : sealed
+              ? `Sparad arbetsdag ${draft.closedDate ?? ''}. Inget mejl skickas.`
+              : started
+                ? 'Pågående arbetsdag. Inget mejl skickas.'
+                : 'Ny arbetsdag. Dagen sparas först när du bekräftar STÄNG DAG.'}
         </p>
       </header>
+
+      <section className="mb-2 rounded-xl border border-border bg-surface p-2.5 shadow-sm">
+        <Button type="button" variant="secondary" className="min-h-12 w-full text-base" onClick={() => setHistoryOpen((open) => !open)}>
+          ÄNDRA DAG
+        </Button>
+        {historyOpen ? (
+          <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+            <label className="text-xs text-text-muted" htmlFor="change-saved-day">
+              Sparat datum
+              <input
+                id="change-saved-day"
+                type="date"
+                className={timeFieldClass}
+                value={historyDate}
+                onChange={(event) => setHistoryDate(event.target.value)}
+              />
+            </label>
+            <Button type="button" className="min-h-12 self-end" disabled={historyPending} onClick={() => void loadHistoricalDay()}>
+              {historyPending ? 'Hämtar...' : 'Hämta sparad dag'}
+            </Button>
+          </div>
+        ) : null}
+        {historyError ? <p className="mt-2 text-sm text-red-600" role="alert">{historyError}</p> : null}
+        {historyMessage ? <p className="mt-2 text-sm text-emerald-700" role="status">{historyMessage}</p> : null}
+      </section>
 
       <div className="space-y-2">
           <section className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-6">
@@ -368,13 +557,13 @@ export function TaxiShiftReportPage() {
                               openEditor(
                                 { mode: 'edit', entry },
                                 amountForInput(entry.amount),
-                                category.id === 'ownBookings' ? entry.bookingIds ?? '' : '',
+                                category.id === 'ownBookings' ? entry.bookingId ?? '' : '',
                               )
                             }
                           >
                             <p className="text-sm font-medium leading-tight text-text">
                               {category.id === 'ownBookings'
-                                ? ownBookingLine(entry.amount, entry.bookingIds)
+                                ? ownBookingLine(entry.amount, entry.bookingId)
                                 : formatSek(entry.amount)}
                             </p>
                             <p className="text-[11px] leading-tight text-text-muted">{formatInstant(entry.recordedAt)}</p>
@@ -390,7 +579,7 @@ export function TaxiShiftReportPage() {
                                 openEditor(
                                   { mode: 'edit', entry },
                                   amountForInput(entry.amount),
-                                  category.id === 'ownBookings' ? entry.bookingIds ?? '' : '',
+                                  category.id === 'ownBookings' ? entry.bookingId ?? '' : '',
                                 )
                               }
                             >
@@ -419,18 +608,86 @@ export function TaxiShiftReportPage() {
             })}
           </section>
 
-          {sealed ? (
+          {correcting ? (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-text" role="status">
+                KORRIGERAR SPARAD DAG – {formatDateTitleSv(draft.correctingDate ?? '').toUpperCase()}
+              </p>
+              <p className="text-xs leading-snug text-text-muted">
+                Arbetad tid från den sparade dagen: {formatHoursValue(draft.loadedWorkedHours ?? '0')}.
+                Start, slut och raster finns inte i den sparade dagen och lämnas tomma tills du fyller i dem.
+              </p>
+              {historyLog && historyLog.length > 0 ? (
+                <ul className="space-y-1 text-xs text-text-muted">
+                  {historyLog.slice(-3).map((entry) => (
+                    <li key={entry.correctedAt}>
+                      Korrigering {entry.correctedAt}: {entry.changes.map((change) => `${change.field} ${change.before || '—'} → ${change.after || '—'}`).join(', ') || 'inga fältändringar'}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {closeError ? <p className="text-sm text-red-600" role="alert">{closeError}</p> : null}
+              <Button type="button" className="min-h-14 w-full text-base" disabled={closing} onClick={() => void saveHistorical()}>
+                SPARA ÄNDRINGAR
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-14 w-full text-base"
+                onClick={() => {
+                  if (!window.confirm('Starta en ny tom dag? Korrigeringen lämnas. Den sparade dagen ligger kvar i TaxiLog.')) return;
+                  setTimeParts({});
+                  setClosePlan(null);
+                  setCloseError(null);
+                  setHistoryMessage(null);
+                  setHistoryLog([]);
+                  setDraft(beginEmptyShift(stockholmCalendarDate(new Date().toISOString())));
+                }}
+              >
+                STARTA NY DAG
+              </Button>
+            </div>
+          ) : sealed ? (
             <div className="space-y-2">
               <p className="text-sm font-semibold text-text" role="status">
                 Dagen {draft.closedDate} är sparad.
               </p>
               <Button
                 type="button"
+                className="min-h-14 w-full text-base"
+                onClick={() => {
+                  if (!draft.closedAt) return;
+                  if (!window.confirm('Starta en ny tom dag? Den sparade dagen ligger kvar i TaxiLog.')) return;
+                  const today = stockholmCalendarDate(new Date().toISOString());
+                  setTimeParts({});
+                  setClosePlan(null);
+                  setCloseNotice(null);
+                  setCloseError(null);
+                  setDraft(startNewShiftDraft(draft, today));
+                }}
+              >
+                STARTA NY DAG
+              </Button>
+              <Button
+                type="button"
                 variant="secondary"
                 className="min-h-14 w-full text-base"
                 onClick={() => {
-                  if (!window.confirm('Öppna dagen för korrigering? Den sparade dagen ligger kvar tills du stänger och sparar igen.')) return;
-                  setDraft((current) => (current ? reopenShiftForCorrection(current) : current));
+                  if (!window.confirm('Öppna dagen för korrigering? Bokningarna hämtas från TaxiLog.')) return;
+                  const date = draft.closedDate;
+                  void (async () => {
+                    let next = draft;
+                    if (date) {
+                      try {
+                        const saved = await taxiLogApi.day(date);
+                        const lines = (saved.day?.ownBookingLines ?? []).filter((line) => line.driverId == null);
+                        next = withServerBookingLines(draft, lines);
+                      } catch {
+                        next = draft;
+                      }
+                    }
+                    setDraft(reopenShiftForCorrection(next));
+                  })();
                 }}
               >
                 Korrigera dagen
@@ -846,12 +1103,12 @@ export function TaxiShiftReportPage() {
                     .filter((entry) => entry.categoryId === 'ownBookings')
                     .map((entry) => (
                       <p key={entry.id} className="text-sm text-text">
-                        {ownBookingLine(entry.amount, entry.bookingIds)}
+                        {ownBookingLine(entry.amount, entry.bookingId)}
                       </p>
                     ))
                 )}
                 <p className="text-xs text-text-muted">
-                  Boknings-ID sparas i utkastet. TaxiLog-dagen har inget fält för dem.
+                  Varje bokning sparas med sitt ID i TaxiLog.
                 </p>
               </div>
               {closeNotice ? (
@@ -921,7 +1178,7 @@ export function TaxiShiftReportPage() {
                     autoCapitalize="characters"
                     autoComplete="off"
                     spellCheck={false}
-                    placeholder="JS001, JS002"
+                    placeholder="JS001"
                     value={bookingIdInput}
                     onChange={(event) => {
                       setBookingIdInput(event.target.value);
@@ -929,7 +1186,7 @@ export function TaxiShiftReportPage() {
                     }}
                     className="mt-1 w-full min-h-11 rounded-lg border border-border bg-surface px-3 text-base text-text outline-none focus:border-accent focus:ring-1 focus:ring-accent"
                   />
-                  <span className="mt-1 block font-normal text-text-muted">Frivilligt. Flera ID:n separeras med kommatecken.</span>
+                  <span className="mt-1 block font-normal text-text-muted">Ett ID per bokning. Flera körningar registreras som egna poster.</span>
                 </label>
               ) : null}
               <div className="mt-3 grid grid-cols-3 gap-2" role="group" aria-label="Numerisk knappsats">

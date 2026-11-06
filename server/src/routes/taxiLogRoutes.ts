@@ -70,6 +70,10 @@ router.post('/day', (req, res) => {
       uberIncome: req.body.uberIncome ?? undefined,
       boltIncome: req.body.boltIncome ?? undefined,
       bonus: req.body.bonus ?? undefined,
+      driverId: req.body.driverId ?? undefined,
+      correctingDate: req.body.correctingDate ?? undefined,
+      openedFingerprint: req.body.openedFingerprint ?? undefined,
+      ownBookingLines: req.body.ownBookingLines ?? undefined,
     });
     res.status(201).json({ day: saved, exportText: getTaxiLogExport(saved?.date ?? req.body.date) });
   } catch (error) {

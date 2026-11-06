@@ -356,6 +356,23 @@ export interface TaxiLogDay {
   workedHours: string;
   chargingKwh: string;
   sourceCategorized?: boolean;
+  ownBookingLines?: TaxiOwnBookingLine[];
+  corrections?: TaxiDayCorrection[];
+  fingerprint?: string;
+}
+
+export interface TaxiDayCorrection {
+  date: string;
+  correctedAt: string;
+  changes: { field: string; before: string; after: string }[];
+}
+
+export interface TaxiOwnBookingLine {
+  bookingId: string;
+  amount: string;
+  date: string;
+  driverId: string | null;
+  recordedAt: string;
 }
 
 export interface TaxiLogSavings {
