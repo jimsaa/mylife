@@ -140,6 +140,7 @@ export function TaxiShiftReportPage() {
   const [historyPending, setHistoryPending] = useState(false);
   const [historyLog, setHistoryLog] = useState<SavedShiftDay['corrections']>([]);
   const [alreadySavedDate, setAlreadySavedDate] = useState<string | null>(null);
+  const [passPrompt, setPassPrompt] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const locationState = location.state as { correctDay?: SavedShiftDay; startNewShift?: boolean } | null;
@@ -186,49 +187,42 @@ export function TaxiShiftReportPage() {
     consumedStart.current = true;
     let cancelled = false;
     void (async () => {
-      if (draft.correctingDate && !draft.closedAt) {
-        setHistoryError('En korrigering är öppen. Ingenting byttes ut.');
-      } else if (draft.startedAt && !draft.endedAt && !draft.closedAt) {
-        setHistoryError('Ett pass pågår redan. Avsluta det med PASS SLUT innan du startar ett nytt.');
-      } else {
-        let savedDate: string | null = null;
-        if (draft.startedAt && draft.endedAt && !draft.closedAt) {
-          const date = instantToStockholmInput(draft.startedAt).slice(0, 10);
-          try {
-            const existing = await taxiLogApi.day(date);
-            if (cancelled) return;
-            savedDate = savedDayExists(existing.day) ? date : null;
-          } catch {
-            if (cancelled) return;
-            setHistoryError('Kunde inte kontrollera om dagen redan är sparad. Ingenting byttes ut.');
-            navigate('/admin/taxi/rapport', { replace: true, state: null });
-            return;
-          }
-        }
-        const message = newPassConfirm({
-          alreadySavedDate: savedDate,
-          sealed: draft.closedAt != null,
-          ended: draft.endedAt != null,
-          unsaved: draftHasUnsavedWork(draft),
-          dateLabel: savedDate ? formatDateTitleSv(savedDate) : '',
-        });
-        if (message && !window.confirm(message)) {
-          setHistoryError(null);
-        } else if (!cancelled) {
-          const startedAt = new Date().toISOString();
-          setNow(startedAt);
-          setTimeParts({});
-          setClosePlan(null);
-          setCloseNotice(null);
-          setCloseError(null);
-          setHistoryError(null);
-          setHistoryMessage(null);
-          setHistoryLog([]);
-          setAlreadySavedDate(null);
-          setDraft(beginNewPass(draft, startedAt));
+      let savedDate: string | null = null;
+      if (draft.startedAt && !draft.closedAt) {
+        const date = instantToStockholmInput(draft.startedAt).slice(0, 10);
+        try {
+          const existing = await taxiLogApi.day(date);
+          if (cancelled) return;
+          savedDate = savedDayExists(existing.day) ? date : null;
+        } catch {
+          savedDate = null;
         }
       }
-      if (!cancelled) navigate('/admin/taxi/rapport', { replace: true, state: null });
+      if (cancelled) return;
+      const message = newPassConfirm({
+        alreadySavedDate: savedDate,
+        sealed: draft.closedAt != null,
+        ended: draft.endedAt != null,
+        unsaved: draftHasUnsavedWork(draft),
+        dateLabel: savedDate ? formatDateTitleSv(savedDate) : '',
+      });
+      if (message) {
+        setPassPrompt(message);
+        setHistoryError(null);
+      } else {
+        const startedAt = new Date().toISOString();
+        setNow(startedAt);
+        setTimeParts({});
+        setClosePlan(null);
+        setCloseNotice(null);
+        setCloseError(null);
+        setHistoryError(null);
+        setHistoryMessage(null);
+        setHistoryLog([]);
+        setAlreadySavedDate(null);
+        setDraft(beginNewPass(draft, startedAt));
+      }
+      navigate('/admin/taxi/rapport', { replace: true, state: null });
     })();
     return () => {
       cancelled = true;
@@ -236,7 +230,7 @@ export function TaxiShiftReportPage() {
   }, [startRequested, draft, navigate]);
 
   useEffect(() => {
-    if (!draft?.startedAt || !draft.endedAt || draft.closedAt || draft.correctingDate) {
+    if (!draft?.startedAt || draft.closedAt) {
       setAlreadySavedDate(null);
       return;
     }
@@ -253,7 +247,7 @@ export function TaxiShiftReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [draft?.startedAt, draft?.endedAt, draft?.closedAt, draft?.correctingDate]);
+  }, [draft?.startedAt, draft?.closedAt]);
 
   useEffect(() => {
     if (!draft?.startedAt || draft.endedAt) return;
@@ -560,7 +554,10 @@ export function TaxiShiftReportPage() {
       unsaved: draftHasUnsavedWork(draft),
       dateLabel: alreadySavedDate ? formatDateTitleSv(alreadySavedDate) : '',
     });
-    if (message && !window.confirm(message)) return;
+    if (message) {
+      setPassPrompt(message);
+      return;
+    }
     const startedAt = new Date().toISOString();
     setNow(startedAt);
     setTimeParts({});
@@ -592,7 +589,33 @@ export function TaxiShiftReportPage() {
         </p>
       </header>
 
-      {!correcting && alreadySavedDate ? (
+      {passPrompt ? (
+        <div className="mb-2 space-y-2 rounded-xl border border-border bg-surface p-3">
+          <p className="text-sm text-text" role="status">{passPrompt}</p>
+          <Button
+            type="button"
+            className="min-h-14 w-full text-base"
+            onClick={() => {
+              setPassPrompt(null);
+              const startedAt = new Date().toISOString();
+              setNow(startedAt);
+              setTimeParts({});
+              setClosePlan(null);
+              setCloseNotice(null);
+              setCloseError(null);
+              setHistoryMessage(null);
+              setHistoryLog([]);
+              setAlreadySavedDate(null);
+              setDraft(beginNewPass(draft, startedAt));
+            }}
+          >
+            STARTA NYTT PASS
+          </Button>
+          <Button type="button" variant="secondary" className="min-h-12 w-full" onClick={() => setPassPrompt(null)}>
+            AVBRYT
+          </Button>
+        </div>
+      ) : !correcting && alreadySavedDate ? (
         <div className="mb-2 space-y-1">
           <p className="text-sm font-semibold text-text" role="status">
             {formatDateTitleSv(alreadySavedDate)} är redan sparad i TaxiLog. Den lämnas orörd.
@@ -609,7 +632,11 @@ export function TaxiShiftReportPage() {
           NYTT PASS
         </Button>
       ) : !correcting && started && !ended ? (
-        <div className="mb-2 grid grid-cols-2 gap-1.5">
+        <div className="mb-2 space-y-1.5">
+          <Button type="button" className="min-h-14 w-full text-base" onClick={startShownPass}>
+            NYTT PASS
+          </Button>
+          <div className="grid grid-cols-2 gap-1.5">
           {!breakOpen ? (
             <Button
               type="button"
@@ -657,6 +684,7 @@ export function TaxiShiftReportPage() {
           >
             PASS SLUT
           </Button>
+          </div>
         </div>
       ) : !correcting && started ? (
         <div className="mb-2 space-y-1">
