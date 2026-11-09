@@ -181,8 +181,17 @@ export function TaxiShiftReportPage() {
   useEffect(() => {
     if (!startRequested || !draft || consumedStart.current) return;
     consumedStart.current = true;
-    if ((draft.startedAt && !draft.closedAt) || (draft.correctingDate && !draft.closedAt)) {
-      setHistoryError('Ett pass pågår redan. Ingenting byttes ut.');
+    if (draft.correctingDate && !draft.closedAt) {
+      setHistoryError('En korrigering är öppen. Ingenting byttes ut.');
+    } else if (draft.startedAt && !draft.endedAt && !draft.closedAt) {
+      setHistoryError('Ett pass pågår redan. Avsluta det med PASS SLUT innan du startar ett nytt.');
+    } else if (
+      draft.endedAt &&
+      !draft.closedAt &&
+      draftHasUnsavedWork(draft) &&
+      !window.confirm('Starta ett nytt pass? Utkastet är inte sparat med STÄNG DAG och försvinner från telefonen. Sparad historik i TaxiLog ändras inte.')
+    ) {
+      setHistoryError(null);
     } else {
       const startedAt = new Date().toISOString();
       setNow(startedAt);
@@ -515,8 +524,10 @@ export function TaxiShiftReportPage() {
             ? `KORRIGERAR SPARAD DAG – ${formatDateTitleSv(draft.correctingDate ?? '').toUpperCase()}`
             : sealed
               ? `Sparad arbetsdag ${draft.closedDate ?? ''}. Inget mejl skickas.`
-              : started
-                ? 'Pågående arbetsdag. Inget mejl skickas.'
+              : started && ended
+                ? 'Passet är avslutat. Spara dagen eller starta ett nytt pass. Inget mejl skickas.'
+                : started
+                  ? 'Pågående arbetsdag. Inget mejl skickas.'
                 : 'Ny arbetsdag. Dagen sparas först när du bekräftar STÄNG DAG.'}
         </p>
       </header>
@@ -609,6 +620,30 @@ export function TaxiShiftReportPage() {
           <p className="text-xs leading-snug text-text-muted">
             Passet är avslutat. Ingenting sparas och inget mejl skickas förrän du bekräftar.
           </p>
+          <Button
+            type="button"
+            variant="secondary"
+            className="min-h-14 w-full text-base"
+            onClick={() => {
+              if (
+                draftHasUnsavedWork(draft) &&
+                !window.confirm('Starta ett nytt pass? Utkastet är inte sparat med STÄNG DAG och försvinner från telefonen. Sparad historik i TaxiLog ändras inte.')
+              ) {
+                return;
+              }
+              const startedAt = new Date().toISOString();
+              setNow(startedAt);
+              setTimeParts({});
+              setClosePlan(null);
+              setCloseNotice(null);
+              setCloseError(null);
+              setHistoryMessage(null);
+              setHistoryLog([]);
+              setDraft(beginNewPass(draft, startedAt));
+            }}
+          >
+            NYTT PASS
+          </Button>
         </div>
       ) : null}
 
