@@ -8,6 +8,8 @@ import {
   applySavedDayLoad,
   beginEmptyShift,
   beginNewPass,
+  newPassConfirm,
+  savedDayExists,
   commitHistoricalCorrection,
   draftFromSavedDay,
   draftHasUnsavedWork,
@@ -1032,6 +1034,17 @@ END_TAXILOG_IMPORT`);
     assert.equal(ended.entries.length, 1);
     const correcting = { ...started, startedAt: null, correctingDate: '2026-11-05', closedAt: null };
     assert.equal(beginNewPass(correcting, nowIso), correcting);
+    assert.equal(savedDayExists(null), false);
+    assert.equal(savedDayExists({ grossIncome: '100.00', workedHours: '8' }), true);
+    const kept = newPassConfirm({
+      alreadySavedDate: '2026-11-06',
+      sealed: false,
+      ended: true,
+      unsaved: true,
+      dateLabel: '6 november 2026',
+    });
+    assert.match(kept ?? '', /6 november 2026 är redan sparad/);
+    assert.match(kept ?? '', /Ingen annan dag ändras/);
   });
 
   it('A–H opens a saved day, adds and edits bookings, and leaves the other day unchanged', () => {

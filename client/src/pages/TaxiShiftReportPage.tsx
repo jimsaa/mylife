@@ -32,6 +32,8 @@ import {
   decideShiftSave,
   draftHasUnsavedWork,
   historicalCorrectionPlan,
+  newPassConfirm,
+  savedDayExists,
   planShiftClose,
   removeBreak,
   removeShiftEntry,
@@ -137,6 +139,7 @@ export function TaxiShiftReportPage() {
   const [historyMessage, setHistoryMessage] = useState<string | null>(null);
   const [historyPending, setHistoryPending] = useState(false);
   const [historyLog, setHistoryLog] = useState<SavedShiftDay['corrections']>([]);
+  const [alreadySavedDate, setAlreadySavedDate] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const locationState = location.state as { correctDay?: SavedShiftDay; startNewShift?: boolean } | null;
@@ -181,31 +184,76 @@ export function TaxiShiftReportPage() {
   useEffect(() => {
     if (!startRequested || !draft || consumedStart.current) return;
     consumedStart.current = true;
-    if (draft.correctingDate && !draft.closedAt) {
-      setHistoryError('En korrigering är öppen. Ingenting byttes ut.');
-    } else if (draft.startedAt && !draft.endedAt && !draft.closedAt) {
-      setHistoryError('Ett pass pågår redan. Avsluta det med PASS SLUT innan du startar ett nytt.');
-    } else if (
-      draft.endedAt &&
-      !draft.closedAt &&
-      draftHasUnsavedWork(draft) &&
-      !window.confirm('Starta ett nytt pass? Utkastet är inte sparat med STÄNG DAG och försvinner från telefonen. Sparad historik i TaxiLog ändras inte.')
-    ) {
-      setHistoryError(null);
-    } else {
-      const startedAt = new Date().toISOString();
-      setNow(startedAt);
-      setTimeParts({});
-      setClosePlan(null);
-      setCloseNotice(null);
-      setCloseError(null);
-      setHistoryError(null);
-      setHistoryMessage(null);
-      setHistoryLog([]);
-      setDraft(beginNewPass(draft, startedAt));
-    }
-    navigate('/admin/taxi/rapport', { replace: true, state: null });
+    let cancelled = false;
+    void (async () => {
+      if (draft.correctingDate && !draft.closedAt) {
+        setHistoryError('En korrigering är öppen. Ingenting byttes ut.');
+      } else if (draft.startedAt && !draft.endedAt && !draft.closedAt) {
+        setHistoryError('Ett pass pågår redan. Avsluta det med PASS SLUT innan du startar ett nytt.');
+      } else {
+        let savedDate: string | null = null;
+        if (draft.startedAt && draft.endedAt && !draft.closedAt) {
+          const date = instantToStockholmInput(draft.startedAt).slice(0, 10);
+          try {
+            const existing = await taxiLogApi.day(date);
+            if (cancelled) return;
+            savedDate = savedDayExists(existing.day) ? date : null;
+          } catch {
+            if (cancelled) return;
+            setHistoryError('Kunde inte kontrollera om dagen redan är sparad. Ingenting byttes ut.');
+            navigate('/admin/taxi/rapport', { replace: true, state: null });
+            return;
+          }
+        }
+        const message = newPassConfirm({
+          alreadySavedDate: savedDate,
+          sealed: draft.closedAt != null,
+          ended: draft.endedAt != null,
+          unsaved: draftHasUnsavedWork(draft),
+          dateLabel: savedDate ? formatDateTitleSv(savedDate) : '',
+        });
+        if (message && !window.confirm(message)) {
+          setHistoryError(null);
+        } else if (!cancelled) {
+          const startedAt = new Date().toISOString();
+          setNow(startedAt);
+          setTimeParts({});
+          setClosePlan(null);
+          setCloseNotice(null);
+          setCloseError(null);
+          setHistoryError(null);
+          setHistoryMessage(null);
+          setHistoryLog([]);
+          setAlreadySavedDate(null);
+          setDraft(beginNewPass(draft, startedAt));
+        }
+      }
+      if (!cancelled) navigate('/admin/taxi/rapport', { replace: true, state: null });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [startRequested, draft, navigate]);
+
+  useEffect(() => {
+    if (!draft?.startedAt || !draft.endedAt || draft.closedAt || draft.correctingDate) {
+      setAlreadySavedDate(null);
+      return;
+    }
+    const date = instantToStockholmInput(draft.startedAt).slice(0, 10);
+    let cancelled = false;
+    void taxiLogApi
+      .day(date)
+      .then((existing) => {
+        if (!cancelled) setAlreadySavedDate(savedDayExists(existing.day) ? date : null);
+      })
+      .catch(() => {
+        if (!cancelled) setAlreadySavedDate(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [draft?.startedAt, draft?.endedAt, draft?.closedAt, draft?.correctingDate]);
 
   useEffect(() => {
     if (!draft?.startedAt || draft.endedAt) return;
@@ -396,18 +444,7 @@ export function TaxiShiftReportPage() {
           return;
         }
         const day = existing.day;
-        const registered = Boolean(
-          day &&
-            (day.sourceCategorized ||
-              day.ownBookings != null ||
-              day.handUp != null ||
-              day.uberIncome != null ||
-              day.boltIncome != null ||
-              day.bonus != null ||
-              Number(day.grossIncome) > 0 ||
-              Number(day.workedHours) > 0 ||
-              Number(day.tips) > 0),
-        );
+        const registered = savedDayExists(day);
         const decision = decideShiftSave({
           status: 'ready',
           date: planned.plan.date,
@@ -515,6 +552,27 @@ export function TaxiShiftReportPage() {
     return parts;
   };
 
+  const startShownPass = () => {
+    const message = newPassConfirm({
+      alreadySavedDate,
+      sealed,
+      ended,
+      unsaved: draftHasUnsavedWork(draft),
+      dateLabel: alreadySavedDate ? formatDateTitleSv(alreadySavedDate) : '',
+    });
+    if (message && !window.confirm(message)) return;
+    const startedAt = new Date().toISOString();
+    setNow(startedAt);
+    setTimeParts({});
+    setClosePlan(null);
+    setCloseNotice(null);
+    setCloseError(null);
+    setHistoryMessage(null);
+    setHistoryLog([]);
+    setAlreadySavedDate(null);
+    setDraft(beginNewPass(draft, startedAt));
+  };
+
   return (
     <div className="mx-auto w-full min-w-0 max-w-5xl" lang="sv-SE">
       <header className="mb-1">
@@ -524,6 +582,8 @@ export function TaxiShiftReportPage() {
             ? `KORRIGERAR SPARAD DAG – ${formatDateTitleSv(draft.correctingDate ?? '').toUpperCase()}`
             : sealed
               ? `Sparad arbetsdag ${draft.closedDate ?? ''}. Inget mejl skickas.`
+              : alreadySavedDate
+                ? `${formatDateTitleSv(alreadySavedDate)} är redan sparad i TaxiLog. Den lämnas orörd.`
               : started && ended
                 ? 'Passet är avslutat. Spara dagen eller starta ett nytt pass. Inget mejl skickas.'
                 : started
@@ -532,23 +592,20 @@ export function TaxiShiftReportPage() {
         </p>
       </header>
 
-      {!correcting && (sealed || !started) ? (
-        <Button
-          type="button"
-          className="mb-2 min-h-14 w-full text-base"
-          onClick={() => {
-            if (sealed && !window.confirm('Starta ett nytt pass? Den sparade dagen ligger kvar i TaxiLog.')) return;
-            const startedAt = new Date().toISOString();
-            setNow(startedAt);
-            setTimeParts({});
-            setClosePlan(null);
-            setCloseNotice(null);
-            setCloseError(null);
-            setHistoryMessage(null);
-            setHistoryLog([]);
-            setDraft(beginNewPass(draft, startedAt));
-          }}
-        >
+      {!correcting && alreadySavedDate ? (
+        <div className="mb-2 space-y-1">
+          <p className="text-sm font-semibold text-text" role="status">
+            {formatDateTitleSv(alreadySavedDate)} är redan sparad i TaxiLog. Den lämnas orörd.
+          </p>
+          <p className="text-xs leading-snug text-text-muted">
+            STÄNG DAG används inte här. Ett nytt pass skriver inte över den dagen eller någon annan sparad dag.
+          </p>
+          <Button type="button" className="min-h-14 w-full text-base" onClick={startShownPass}>
+            NYTT PASS
+          </Button>
+        </div>
+      ) : !correcting && (sealed || !started) ? (
+        <Button type="button" className="mb-2 min-h-14 w-full text-base" onClick={startShownPass}>
           NYTT PASS
         </Button>
       ) : !correcting && started && !ended ? (
@@ -620,28 +677,7 @@ export function TaxiShiftReportPage() {
           <p className="text-xs leading-snug text-text-muted">
             Passet är avslutat. Ingenting sparas och inget mejl skickas förrän du bekräftar.
           </p>
-          <Button
-            type="button"
-            variant="secondary"
-            className="min-h-14 w-full text-base"
-            onClick={() => {
-              if (
-                draftHasUnsavedWork(draft) &&
-                !window.confirm('Starta ett nytt pass? Utkastet är inte sparat med STÄNG DAG och försvinner från telefonen. Sparad historik i TaxiLog ändras inte.')
-              ) {
-                return;
-              }
-              const startedAt = new Date().toISOString();
-              setNow(startedAt);
-              setTimeParts({});
-              setClosePlan(null);
-              setCloseNotice(null);
-              setCloseError(null);
-              setHistoryMessage(null);
-              setHistoryLog([]);
-              setDraft(beginNewPass(draft, startedAt));
-            }}
-          >
+          <Button type="button" variant="secondary" className="min-h-14 w-full text-base" onClick={startShownPass}>
             NYTT PASS
           </Button>
         </div>

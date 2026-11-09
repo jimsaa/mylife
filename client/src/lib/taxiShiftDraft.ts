@@ -441,6 +441,48 @@ export function draftHasUnsavedWork(draft: TaxiShiftDraft): boolean {
   return Boolean(draft.startedAt || draft.endedAt || draft.entries.length > 0 || draft.breaks.length > 0 || draft.correctingDate);
 }
 
+export function savedDayExists(day: {
+  sourceCategorized?: boolean;
+  ownBookings?: string | null;
+  handUp?: string | null;
+  uberIncome?: string | null;
+  boltIncome?: string | null;
+  bonus?: string | null;
+  grossIncome?: string | null;
+  workedHours?: string | null;
+  tips?: string | null;
+} | null | undefined): boolean {
+  if (!day) return false;
+  return Boolean(
+    day.sourceCategorized ||
+      day.ownBookings != null ||
+      day.handUp != null ||
+      day.uberIncome != null ||
+      day.boltIncome != null ||
+      day.bonus != null ||
+      Number(day.grossIncome) > 0 ||
+      Number(day.workedHours) > 0 ||
+      Number(day.tips) > 0,
+  );
+}
+
+export function newPassConfirm(input: {
+  alreadySavedDate: string | null;
+  sealed: boolean;
+  ended: boolean;
+  unsaved: boolean;
+  dateLabel: string;
+}): string | null {
+  if (input.alreadySavedDate) {
+    return `Starta ett nytt pass? ${input.dateLabel} är redan sparad i TaxiLog och lämnas orörd. Ingen annan dag ändras.`;
+  }
+  if (input.sealed) return 'Starta ett nytt pass? Den sparade dagen ligger kvar i TaxiLog.';
+  if (input.ended && input.unsaved) {
+    return 'Starta ett nytt pass? Utkastet är inte sparat med STÄNG DAG och försvinner från telefonen. Sparad historik i TaxiLog ändras inte.';
+  }
+  return null;
+}
+
 export function savedDateBlock(date: string, alreadySaved: boolean, correctingDate: string | null): string | null {
   if (correctingDate && correctingDate !== date) {
     return `Korrigeringen gäller ${correctingDate} och kan inte sparas på ${date}.`;
