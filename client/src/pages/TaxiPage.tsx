@@ -249,6 +249,9 @@ export function TaxiPage() {
             >
               SKICKA RAPPORT TILL TOBBE
             </Button>
+            <Link to="/admin/taxi/rapport" state={{ startNewShift: true }}>
+              <Button className="min-h-12">NYTT PASS</Button>
+            </Link>
             <Button type="button" variant="secondary" onClick={() => { setReviseOpen((open) => !open); setReviseError(''); }}>
               ÄNDRA DAG
             </Button>

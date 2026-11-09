@@ -9,6 +9,7 @@ import {
   addShiftEntry,
   applySavedDayLoad,
   beginEmptyShift,
+  beginNewPass,
   calculateReportedWork,
   cashTotal,
   categorySharePercent,
@@ -40,10 +41,8 @@ import {
   saveTaxiShiftDraft,
   stockholmCalendarDate,
   setShiftEnd,
-  startNewShiftDraft,
   setShiftStart,
   startBreak,
-  startShift,
   TAXI_SHIFT_CATEGORIES,
   updateBreak,
   updateShiftEntry,
@@ -140,8 +139,11 @@ export function TaxiShiftReportPage() {
   const [historyLog, setHistoryLog] = useState<SavedShiftDay['corrections']>([]);
   const location = useLocation();
   const navigate = useNavigate();
-  const incomingDay = (location.state as { correctDay?: SavedShiftDay } | null)?.correctDay;
+  const locationState = location.state as { correctDay?: SavedShiftDay; startNewShift?: boolean } | null;
+  const incomingDay = locationState?.correctDay;
+  const startRequested = locationState?.startNewShift === true;
   const consumedDay = useRef<string | null>(null);
+  const consumedStart = useRef(false);
 
   useEffect(() => {
     setDraft(loadTaxiShiftDraft(window.localStorage));
@@ -175,6 +177,26 @@ export function TaxiShiftReportPage() {
     }
     navigate('/admin/taxi/rapport', { replace: true, state: null });
   }, [incomingDay, draft, navigate]);
+
+  useEffect(() => {
+    if (!startRequested || !draft || consumedStart.current) return;
+    consumedStart.current = true;
+    if ((draft.startedAt && !draft.closedAt) || (draft.correctingDate && !draft.closedAt)) {
+      setHistoryError('Ett pass pågår redan. Ingenting byttes ut.');
+    } else {
+      const startedAt = new Date().toISOString();
+      setNow(startedAt);
+      setTimeParts({});
+      setClosePlan(null);
+      setCloseNotice(null);
+      setCloseError(null);
+      setHistoryError(null);
+      setHistoryMessage(null);
+      setHistoryLog([]);
+      setDraft(beginNewPass(draft, startedAt));
+    }
+    navigate('/admin/taxi/rapport', { replace: true, state: null });
+  }, [startRequested, draft, navigate]);
 
   useEffect(() => {
     if (!draft?.startedAt || draft.endedAt) return;
@@ -499,6 +521,97 @@ export function TaxiShiftReportPage() {
         </p>
       </header>
 
+      {!correcting && (sealed || !started) ? (
+        <Button
+          type="button"
+          className="mb-2 min-h-14 w-full text-base"
+          onClick={() => {
+            if (sealed && !window.confirm('Starta ett nytt pass? Den sparade dagen ligger kvar i TaxiLog.')) return;
+            const startedAt = new Date().toISOString();
+            setNow(startedAt);
+            setTimeParts({});
+            setClosePlan(null);
+            setCloseNotice(null);
+            setCloseError(null);
+            setHistoryMessage(null);
+            setHistoryLog([]);
+            setDraft(beginNewPass(draft, startedAt));
+          }}
+        >
+          NYTT PASS
+        </Button>
+      ) : !correcting && started && !ended ? (
+        <div className="mb-2 grid grid-cols-2 gap-1.5">
+          {!breakOpen ? (
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-14 w-full px-2 text-base"
+              onClick={() => {
+                const startedAt = new Date().toISOString();
+                setNow(startedAt);
+                setDraft((current) =>
+                  current ? startBreak(current, { id: crypto.randomUUID(), startedAt, endedAt: null }) : current,
+                );
+              }}
+            >
+              PAUSE
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              className="min-h-14 w-full px-2 text-base"
+              onClick={() => {
+                const endedAt = new Date().toISOString();
+                setNow(endedAt);
+                setDraft((current) => (current ? resumeBreak(current, endedAt) : current));
+              }}
+            >
+              ÅTERUPPTA PASS
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="secondary"
+            className="min-h-14 w-full px-2 text-base"
+            onClick={() => {
+              if (!window.confirm('Avsluta passet nu? Ingenting sparas till dagen.')) return;
+              const endedAt = new Date().toISOString();
+              setNow(endedAt);
+              setTimeParts((current) => {
+                if (!('shift-end' in current)) return current;
+                const copy = { ...current };
+                delete copy['shift-end'];
+                return copy;
+              });
+              setDraft((current) => (current ? endShift(current, endedAt) : current));
+            }}
+          >
+            PASS SLUT
+          </Button>
+        </div>
+      ) : !correcting && started ? (
+        <div className="mb-2 space-y-1">
+          {canClose ? (
+            <Button type="button" className="min-h-14 w-full text-base" onClick={openClose}>
+              STÄNG DAG
+            </Button>
+          ) : (
+            <p className="text-sm text-red-600" role="alert">
+              STÄNG DAG visas när sluttiden är efter starttiden.
+            </p>
+          )}
+          {closeError && !closePlan ? (
+            <p className="text-sm text-red-600" role="alert">
+              {closeError}
+            </p>
+          ) : null}
+          <p className="text-xs leading-snug text-text-muted">
+            Passet är avslutat. Ingenting sparas och inget mejl skickas förrän du bekräftar.
+          </p>
+        </div>
+      ) : null}
+
       <section className="mb-2 rounded-xl border border-border bg-surface p-2.5 shadow-sm">
         <Button type="button" variant="secondary" className="min-h-12 w-full text-base" onClick={() => setHistoryOpen((open) => !open)}>
           ÄNDRA DAG
@@ -654,22 +767,6 @@ export function TaxiShiftReportPage() {
               </p>
               <Button
                 type="button"
-                className="min-h-14 w-full text-base"
-                onClick={() => {
-                  if (!draft.closedAt) return;
-                  if (!window.confirm('Starta en ny tom dag? Den sparade dagen ligger kvar i TaxiLog.')) return;
-                  const today = stockholmCalendarDate(new Date().toISOString());
-                  setTimeParts({});
-                  setClosePlan(null);
-                  setCloseNotice(null);
-                  setCloseError(null);
-                  setDraft(startNewShiftDraft(draft, today));
-                }}
-              >
-                STARTA NY DAG
-              </Button>
-              <Button
-                type="button"
                 variant="secondary"
                 className="min-h-14 w-full text-base"
                 onClick={() => {
@@ -693,93 +790,7 @@ export function TaxiShiftReportPage() {
                 Korrigera dagen
               </Button>
             </div>
-          ) : !started ? (
-            <Button
-              type="button"
-              className="min-h-14 w-full text-base"
-              onClick={() => {
-                const startedAt = new Date().toISOString();
-                setNow(startedAt);
-                setTimeParts((current) => {
-                  if (!('shift-start' in current)) return current;
-                  const copy = { ...current };
-                  delete copy['shift-start'];
-                  return copy;
-                });
-                setDraft((current) => (current ? startShift(current, startedAt) : current));
-              }}
-            >
-              STARTA PASS
-            </Button>
-          ) : !ended ? (
-            <div className="grid grid-cols-2 gap-1.5">
-              {!breakOpen ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="min-h-14 w-full px-2 text-base"
-                  onClick={() => {
-                    const startedAt = new Date().toISOString();
-                    setNow(startedAt);
-                    setDraft((current) =>
-                      current ? startBreak(current, { id: crypto.randomUUID(), startedAt, endedAt: null }) : current,
-                    );
-                  }}
-                >
-                  PAUSE
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  className="min-h-14 w-full px-2 text-base"
-                  onClick={() => {
-                    const endedAt = new Date().toISOString();
-                    setNow(endedAt);
-                    setDraft((current) => (current ? resumeBreak(current, endedAt) : current));
-                  }}
-                >
-                  ÅTERUPPTA PASS
-                </Button>
-              )}
-              <Button
-                type="button"
-                variant="secondary"
-                className="min-h-14 w-full px-2 text-base"
-                onClick={() => {
-                  if (!window.confirm('Avsluta passet nu? Ingenting sparas till dagen.')) return;
-                  const endedAt = new Date().toISOString();
-                  setNow(endedAt);
-                  setTimeParts((current) => {
-                    if (!('shift-end' in current)) return current;
-                    const copy = { ...current };
-                    delete copy['shift-end'];
-                    return copy;
-                  });
-                  setDraft((current) => (current ? endShift(current, endedAt) : current));
-                }}
-              >
-                PASS SLUT
-              </Button>
-            </div>
-          ) : canClose ? (
-            <div className="space-y-1">
-              <Button type="button" className="min-h-14 w-full text-base" onClick={openClose}>
-                STÄNG DAG
-              </Button>
-              {closeError && !closePlan ? (
-                <p className="text-sm text-red-600" role="alert">
-                  {closeError}
-                </p>
-              ) : null}
-              <p className="text-xs leading-snug text-text-muted">
-                Passet är avslutat. Ingenting sparas och inget mejl skickas förrän du bekräftar.
-              </p>
-            </div>
-          ) : (
-            <p className="text-sm text-red-600" role="alert">
-              STÄNG DAG visas när sluttiden är efter starttiden.
-            </p>
-          )}
+          ) : null}
 
           <section className="grid grid-cols-2 gap-1.5 lg:grid-cols-4">
             {(

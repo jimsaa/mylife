@@ -7,6 +7,7 @@ import {
   addShiftEntry,
   applySavedDayLoad,
   beginEmptyShift,
+  beginNewPass,
   commitHistoricalCorrection,
   draftFromSavedDay,
   draftHasUnsavedWork,
@@ -989,6 +990,40 @@ END_TAXILOG_IMPORT`);
     assert.equal(fresh.breaks.length, 0);
     assert.equal(sealed.correctingDate, '2026-11-05');
     assert.equal(sealed.entries[0]?.bookingId, 'JS001');
+  });
+
+  it('starts a new pass from a closed day and leaves an active pass unchanged', () => {
+    const nowIso = '2026-11-06T08:00:00.000Z';
+    const closed = finishShiftClose(
+      addShiftEntry(setShiftStart(emptyTaxiShiftDraft(), '2026-11-05T07:00:00.000Z'), {
+        id: 'a',
+        categoryId: 'ownBookings',
+        amount: '800.00',
+        recordedAt: '2026-11-05T08:00:00.000Z',
+        bookingId: 'JS001',
+      }),
+      { ok: true, savedAt: '2026-11-05T16:00:00.000Z', date: '2026-11-05' },
+    );
+    const next = beginNewPass(closed, nowIso);
+    assert.equal(next.startedAt, nowIso);
+    assert.equal(next.closedAt, null);
+    assert.equal(next.correctingDate, null);
+    assert.equal(next.entries.length, 0);
+    assert.equal(next.workDate, '2026-11-06');
+    assert.equal(closed.entries[0]?.bookingId, 'JS001');
+    const idle = addShiftEntry(emptyTaxiShiftDraft(), {
+      id: 'b',
+      categoryId: 'uberIncome',
+      amount: '100.00',
+      recordedAt: nowIso,
+    });
+    const started = beginNewPass(idle, nowIso);
+    assert.equal(started.startedAt, nowIso);
+    assert.equal(started.entries.length, 1);
+    const active = beginNewPass(started, '2026-11-06T09:00:00.000Z');
+    assert.equal(active, started);
+    const correcting = { ...started, startedAt: null, correctingDate: '2026-11-05', closedAt: null };
+    assert.equal(beginNewPass(correcting, nowIso), correcting);
   });
 
   it('A–H opens a saved day, adds and edits bookings, and leaves the other day unchanged', () => {

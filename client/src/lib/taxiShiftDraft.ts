@@ -428,6 +428,12 @@ export function beginEmptyShift(today: string): TaxiShiftDraft {
   return { ...emptyTaxiShiftDraft(), workDate: today };
 }
 
+export function beginNewPass(draft: TaxiShiftDraft, nowIso: string): TaxiShiftDraft {
+  if ((draft.startedAt && !draft.closedAt) || (draft.correctingDate && !draft.closedAt)) return draft;
+  const open = draft.closedAt ? startNewShiftDraft(draft, stockholmCalendarDate(nowIso)) : draft;
+  return startShift(open, nowIso);
+}
+
 export function draftHasUnsavedWork(draft: TaxiShiftDraft): boolean {
   if (draft.closedAt) return false;
   return Boolean(draft.startedAt || draft.endedAt || draft.entries.length > 0 || draft.breaks.length > 0 || draft.correctingDate);
