@@ -427,37 +427,52 @@ export function TaxiShiftReportPage() {
     setClosePlan(planned.plan);
     const token = ++closeToken.current;
     const [year, month] = planned.plan.date.split('-').map(Number);
-    void Promise.all([taxiLogApi.day(planned.plan.date), taxiLogApi.month(year, month)])
-      .then(([existing, overview]) => {
+    void (async () => {
+      try {
+        const existing = await taxiLogApi.day(planned.plan.date);
         if (closeToken.current !== token) return;
-        if (overview.settlementLocked) {
+        let locked = false;
+        try {
+          const overview = await taxiLogApi.month(year, month);
+          locked = Boolean(overview.settlementLocked);
+        } catch {
+          locked = false;
+        }
+        if (closeToken.current !== token) return;
+        if (locked) {
           const decision = decideShiftSave({ status: 'locked' });
           setCloseBlocked(true);
           setCloseReady(false);
           setCloseNotice(decision.message);
           return;
         }
-        const day = existing.day;
-        const registered = savedDayExists(day);
         const decision = decideShiftSave({
           status: 'ready',
           date: planned.plan.date,
-          alreadySaved: registered,
+          alreadySaved: savedDayExists(existing.day),
           correctingDate: draft.correctingDate,
         });
         setCloseBlocked(!decision.allowSave);
         setCloseReady(decision.allowSave);
         setCloseNotice(decision.allowSave ? decision.message : null);
         setCloseError(decision.allowSave ? null : decision.message);
-      })
-      .catch(() => {
+      } catch (error) {
         if (closeToken.current !== token) return;
+        const status = typeof error === 'object' && error && 'status' in error ? Number((error as { status?: number }).status) : 0;
+        const detail = error instanceof Error ? error.message : '';
         const decision = decideShiftSave({ status: 'unavailable' });
         setCloseBlocked(true);
         setCloseReady(false);
         setCloseNotice(null);
-        setCloseError(decision.message);
-      });
+        setCloseError(
+          status === 401
+            ? 'Inloggningen har gått ut. Ladda om sidan och logga in igen. Ingenting sparades.'
+            : detail && detail !== 'Request failed'
+              ? `${decision.message} ${detail}`
+              : decision.message,
+        );
+      }
+    })();
   };
 
   const confirmClose = async () => {
